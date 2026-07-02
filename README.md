@@ -1,5 +1,8 @@
 # go-widgets/tui
 
+![status](https://img.shields.io/badge/status-planned-9a6700)
+[![license](https://img.shields.io/badge/license-BSD--3--Clause-blue)](./LICENSE)
+
 **Status: planned.** This repo is a placeholder while the design is
 sketched.
 
