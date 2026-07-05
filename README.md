@@ -1,48 +1,80 @@
 # go-widgets/tui
 
-![status](https://img.shields.io/badge/status-planned-9a6700)
+[![CI](https://github.com/go-widgets/tui/actions/workflows/ci.yml/badge.svg)](https://github.com/go-widgets/tui/actions/workflows/ci.yml)
+[![pkg.go.dev](https://img.shields.io/badge/pkg.go.dev-tui-007d9c?logo=go&logoColor=white)](https://pkg.go.dev/github.com/go-widgets/tui)
+![coverage](https://img.shields.io/badge/coverage-100%25-1a7f37)
+![go](https://img.shields.io/badge/Go-1.26.4%2B-00ADD8?logo=go&logoColor=white)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-blue)](./LICENSE)
 
-**Status: planned.** This repo is a placeholder while the design is
-sketched.
+Terminal I/O layer around [`go-widgets/painter`](https://github.com/go-widgets/painter)'s
+`CellPainter`. Renders a widget tree as a self-contained ANSI stream
+sized to the current terminal, so the *same widget code* that produces
+pixels for a WUI or GUI back-end also produces text for a terminal.
 
-## What it will be
+## What it is (and what it isn't)
 
-A pure-Go widget set that renders into a **terminal cell grid** the
-same way [go-widgets/toolkit](https://github.com/go-widgets/toolkit)
-renders into an RGBA byte buffer. Same design axiom:
+The package is deliberately minimal — no raw mode, no keyboard event
+loop, no alt-screen management. It ships a **snapshot model**: render
+one frame to a writer and return. Compose it with a caller-managed
+event loop or a CLI that prints once and exits.
 
-- **Byte-buffer first**: `Draw(cells []Cell, gridW int, theme *Theme)`
-  where `Cell` is `struct { Rune rune; Fg, Bg RGBA }`. The caller
-  owns the grid; the widget composes cells.
-- **No dependency at the toolkit level**: the ANSI writer /
-  raw-mode setup / event pump live in a separate `tui/host`
-  subpackage. The core widget set can be tested purely against
-  in-memory cell grids.
-- **Coherent theming**: reuse `toolkit.Theme` — a widget's ink
-  colour maps to the closest 256-colour / true-colour ANSI cell.
-- **100 % statement coverage**.
+```go
+import (
+    "os"
 
-## What it will NOT be
+    "github.com/go-widgets/painter"
+    "github.com/go-widgets/tui"
+)
 
-- **Not a full-screen framework** like tview / bubbletea. Those
-  own the terminal + the event loop; this repo owns just the
-  widget rendering + the (rune, fg, bg) grid abstraction. Bring
-  your own host loop.
-- **Not a re-implementation** of every toolkit widget. The
-  practical MVP set: Button, Label, Entry, TextView (single-line
-  wrap), Menu, MenuBar, Statusbar, ListBox, ProgressBar. Pixel-
-  precise widgets (ColorChooser, Calendar) don't map cleanly to
-  a cell grid.
+widgets := []painter.Widget{
+    &painter.Label{Bounds: painter.Rect{X: 2, Y: 1, W: 30, H: 1}, Text: "GO WIDGETS TUI"},
+    &painter.Button{Bounds: painter.Rect{X: 2, Y: 3, W: 12, H: 3}, Label: "OK"},
+    &painter.ProgressBar{Bounds: painter.Rect{X: 2, Y: 8, W: 30, H: 3}, Value: 0.72},
+}
+_ = tui.RenderOnce(os.Stdout, widgets, nil) // nil theme = LightTheme
+```
 
-## Why this repo exists NOW
+An `App` runner with input, resize, and cleanup handling is future
+work — this repo intentionally leaves that surface for a follow-up
+cycle rather than shipping a half-baked event loop.
 
-Reserving the name in the `go-widgets` org so external consumers
-can watch it + a future implementation lands at the expected URL.
-No code is committed until the API stabilises against a real
-consumer. If you have a use case, please open an issue — the design
-is not yet frozen.
+## Sizing
+
+Two variants, take your pick:
+
+- `RenderOnceSized(w, cols, rows, widgets, theme)` — explicit
+  dimensions. The reliable form for tests, size-aware callers, and
+  headless renderers.
+- `RenderOnce(w, widgets, theme)` — queries `EnvSize()` (COLUMNS /
+  LINES environment variables) and falls back to `DefaultCols` x
+  `DefaultRows` (80 x 24) when the environment does not report a size.
+
+The env-vars-only strategy is a deliberate trade-off: it keeps the
+package stdlib-only — no `TIOCGWINSZ` ioctl per platform, no cgo, no
+dependency on `golang.org/x/term`. Interactive shells that need
+dynamic sizes should export `COLUMNS` / `LINES` from their prompt
+hook, or pass an explicit size to `RenderOnceSized`.
+
+## Try it
+
+```bash
+# Default terminal size (or COLUMNS / LINES if set)
+go run ./cmd/tui-snapshot
+
+# Force a specific size + dark theme
+go run ./cmd/tui-snapshot --cols=100 --rows=25 --theme=dark
+```
+
+The demo mirrors [`painter/cmd/tui-demo`](https://github.com/go-widgets/painter/tree/main/cmd/tui-demo):
+same three-widget layout (label, two buttons, progress bar), same
+theme selection.
+
+## Design axiom
+
+Same as the rest of `go-widgets`: **dependency-free, stdlib-only,
+100% coverage** (library packages *and* `cmd/`). CI enforces the
+coverage gate on every push.
 
 ## License
 
-BSD-3-Clause.
+BSD-3-Clause. See [LICENSE](./LICENSE).
