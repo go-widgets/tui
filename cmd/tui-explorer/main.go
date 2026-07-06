@@ -87,7 +87,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // can address them by field name without threading a container tree.
 type state struct {
 	fileList      *fileList
-	content       *toolkit.TextView
+	content       *textPreview
 	status        *toolkit.Label
 	menuBar       *toolkit.Label
 	helpPopover   *toolkit.Popover
@@ -120,8 +120,8 @@ func newState() *state {
 	paths := []string{"/src/main.go", "/src/util.go", "/docs/README.md", "/LICENSE"}
 
 	fl := &fileList{items: paths, selected: 0}
-	content := toolkit.NewTextView(files[paths[0]])
-	content.Focused = false
+	content := &textPreview{}
+	content.setText(files[paths[0]])
 
 	body := &hSplit{left: fl, right: content, leftFrac: 30}
 
@@ -161,10 +161,83 @@ func newState() *state {
 // selected fileList index.
 func (s *state) syncContent() {
 	if s.fileList.selected < 0 || s.fileList.selected >= len(s.paths) {
-		s.content.SetText("(no selection)")
+		s.content.setText("(no selection)")
 		return
 	}
-	s.content.SetText(s.files[s.paths[s.fileList.selected]])
+	s.content.setText(s.files[s.paths[s.fileList.selected]])
+}
+
+// textPreview is a cell-native read-only text view: 1 line per cell
+// row, no border, no cursor. Replaces toolkit.TextView which uses
+// GlyphHeight+4 = 11 cells per line in cell mode — only ~2 lines
+// fit in a typical terminal body.
+type textPreview struct {
+	toolkit.Base
+	lines []string
+}
+
+// Text returns the current buffer as a single string (lines joined
+// by newlines). Retained mainly for tests that inspect the sync
+// path: syncContent → setText → Text should round-trip the file
+// body without loss.
+func (t *textPreview) Text() string {
+	if len(t.lines) == 0 {
+		return ""
+	}
+	total := 0
+	for _, l := range t.lines {
+		total += len(l) + 1
+	}
+	buf := make([]byte, 0, total)
+	for i, l := range t.lines {
+		if i > 0 {
+			buf = append(buf, '\n')
+		}
+		buf = append(buf, l...)
+	}
+	return string(buf)
+}
+
+func (t *textPreview) setText(s string) {
+	if s == "" {
+		t.lines = nil
+		return
+	}
+	t.lines = splitLines(s)
+}
+
+// splitLines splits s on '\n', dropping the trailing empty element
+// if the string ends with '\n'. Keeps intermediate empties (blank
+// lines in source files must render as blank rows).
+func splitLines(s string) []string {
+	out := make([]string, 0, 8)
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		out = append(out, s[start:])
+	}
+	return out
+}
+
+func (t *textPreview) Draw(p painter.Painter, theme *toolkit.Theme) {
+	r := t.Bounds()
+	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.Surface.R, G: theme.Surface.G, B: theme.Surface.B, A: theme.Surface.A,
+	})
+	for i, line := range t.lines {
+		y := r.Y + i
+		if y >= r.Y+r.H {
+			break
+		}
+		toolkit.DrawText(p, r.X+1, y, line, toolkit.RGBA{
+			R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A,
+		})
+	}
 }
 
 // fileList is a cell-native list widget: one item per row, selection
@@ -178,18 +251,27 @@ type fileList struct {
 
 func (f *fileList) Draw(p painter.Painter, theme *toolkit.Theme) {
 	r := f.Bounds()
+	// Paint the full pane background first so surface color fills
+	// even the rows past len(items).
+	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.Surface.R, G: theme.Surface.G, B: theme.Surface.B, A: theme.Surface.A,
+	})
 	for i, item := range f.items {
 		y := r.Y + i
 		if y >= r.Y+r.H {
 			break
 		}
-		ink := theme.OnSurface
+		ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
 		if i == f.selected {
-			// Selected row: accent-fill background, background-color ink.
-			for x := r.X; x < r.X+r.W; x++ {
-				p.PutPixel(x, y, theme.Accent)
-			}
-			ink = theme.Background
+			// Selected row: accent-fill background via FillRect (fills
+			// cell backgrounds, not '█' glyphs), ink switches to
+			// theme.Background for contrast. Prior versions used
+			// PutPixel which in cell mode paints solid-block chars —
+			// which reads as "█████" instead of a highlight strip.
+			p.FillRect(painter.Rect{X: r.X, Y: y, W: r.W, H: 1}, painter.RGBA{
+				R: theme.Accent.R, G: theme.Accent.G, B: theme.Accent.B, A: theme.Accent.A,
+			})
+			ink = toolkit.RGBA{R: theme.Background.R, G: theme.Background.G, B: theme.Background.B, A: theme.Background.A}
 		}
 		toolkit.DrawText(p, r.X+1, y, item, ink)
 	}

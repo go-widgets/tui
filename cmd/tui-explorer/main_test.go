@@ -288,6 +288,48 @@ func TestHSplitOnEventForwardsToLeft(t *testing.T) {
 	}
 }
 
+// textPreview tests.
+func TestTextPreviewSetTextAndText(t *testing.T) {
+	tp := &textPreview{}
+	tp.setText("a\nb\nc")
+	if len(tp.lines) != 3 {
+		t.Fatalf("lines = %v, want 3", tp.lines)
+	}
+	if got := tp.Text(); got != "a\nb\nc" {
+		t.Errorf("Text() = %q, want %q", got, "a\nb\nc")
+	}
+}
+func TestTextPreviewSetEmptyClears(t *testing.T) {
+	tp := &textPreview{lines: []string{"a"}}
+	tp.setText("")
+	if tp.lines != nil {
+		t.Errorf("lines not nil after setText(\"\"): %v", tp.lines)
+	}
+	if got := tp.Text(); got != "" {
+		t.Errorf("Text() empty = %q, want empty", got)
+	}
+}
+func TestTextPreviewSetTextTrailingNewline(t *testing.T) {
+	tp := &textPreview{}
+	tp.setText("hello\n")
+	if len(tp.lines) != 1 || tp.lines[0] != "hello" {
+		t.Errorf("trailing newline handling wrong: %v", tp.lines)
+	}
+}
+func TestTextPreviewDrawRendersLinesAndClipsBounds(t *testing.T) {
+	tp := &textPreview{}
+	tp.setText("a\nb\nc\nd\ne")
+	tp.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3}) // only 3 rows fit
+	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
+	tp.Draw(pnt, toolkit.DefaultLight())
+}
+func TestTextPreviewDrawEmpty(t *testing.T) {
+	tp := &textPreview{}
+	tp.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3})
+	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
+	tp.Draw(pnt, toolkit.DefaultLight())
+}
+
 // packedVBox tests preserved from v0.3.3.
 func TestPackedVBoxLayoutHeaderBodyFooter(t *testing.T) {
 	h := toolkit.NewLabel("H")
