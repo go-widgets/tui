@@ -65,9 +65,27 @@ go run ./cmd/tui-snapshot
 go run ./cmd/tui-snapshot --cols=100 --rows=25 --theme=dark
 ```
 
-The demo mirrors [`painter/cmd/tui-demo`](https://github.com/go-widgets/painter/tree/main/cmd/tui-demo):
+The `tui-snapshot` demo mirrors [`painter/cmd/tui-demo`](https://github.com/go-widgets/painter/tree/main/cmd/tui-demo):
 same three-widget layout (label, two buttons, progress bar), same
 theme selection.
+
+For a broader showcase using the real
+[go-widgets/toolkit](https://github.com/go-widgets/toolkit) widgets
+(Button, ToggleButton, Switch, Entry, ProgressBar, Alert, Stat,
+Timeline …) rendered through the same cell backend:
+
+```bash
+# Toolkit widget catalogue in two columns
+go run ./cmd/tui-catalogue
+
+# Force size + dark theme
+go run ./cmd/tui-catalogue --cols=100 --rows=25 --theme=dark
+```
+
+Internally uses `tui.RenderToolkit` (the bridge that accepts
+`toolkit.Widget` and translates `toolkit.Theme` to what
+`painter.CellPainter` expects) so the on-screen widgets are the
+same objects a wasm gallery or a native window would compose.
 
 ## Design axiom
 
