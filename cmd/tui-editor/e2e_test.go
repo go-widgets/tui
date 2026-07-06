@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/go-widgets/tui"
 )
 
 func TestEditorRendersHeaderAndFooterInPty(t *testing.T) {
@@ -62,21 +63,19 @@ func TestEditorRendersHeaderAndFooterInPty(t *testing.T) {
 	}
 	_ = c.Wait()
 
-	stripped := stripANSI(buf.Bytes())
-	rows := splitRows(stripped)
-	if len(rows) < 30 {
-		t.Fatalf("got %d rendered rows, want ≥ 30\n---raw---\n%s", len(rows), stripped)
+	// Decode into a cell grid — since painter v0.1.1 emits absolute
+	// cursor positioning per row instead of \n, splitting on \n
+	// would collapse the frame to one line. The grid places every
+	// rune at its true (x,y).
+	g := tui.DecodeANSI(buf.Bytes(), 80, 30)
+	if !strings.Contains(g.RowText(0), "File") {
+		t.Errorf("row 0 (header) missing 'File': %q", g.RowText(0))
 	}
-
-	if !strings.Contains(rows[0], "File") {
-		t.Errorf("row 0 (header) missing 'File': %q", rows[0])
+	if !strings.Contains(g.RowText(29), "VIEW") {
+		t.Errorf("row 29 (footer) missing 'VIEW': %q", g.RowText(29))
 	}
-	// Footer carries the mode name — VIEW at startup.
-	if !strings.Contains(rows[29], "VIEW") {
-		t.Errorf("row 29 (footer) missing 'VIEW': %q", rows[29])
-	}
-	if !strings.Contains(rows[29], "*scratch*") {
-		t.Errorf("row 29 (footer) missing '*scratch*': %q", rows[29])
+	if !strings.Contains(g.RowText(29), "*scratch*") {
+		t.Errorf("row 29 (footer) missing '*scratch*': %q", g.RowText(29))
 	}
 }
 
