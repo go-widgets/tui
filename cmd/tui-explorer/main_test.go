@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
 )
@@ -279,6 +280,55 @@ func TestRunBadFlagReturnsTwo(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--not-a-flag"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("run(--not-a-flag) = %d, want 2", code)
+	}
+}
+
+// TestPackedVBoxLayoutHeaderBodyFooter drives the layout helper
+// directly: given 80×30, header at y=0 h=1, footer at y=29 h=1,
+// body y=1 h=28. Catches the regression that shipped in v0.3.0 /
+// v0.3.1 where a plain toolkit.VBox divided the three children
+// equally, wrecking the interactive demo's chrome.
+func TestPackedVBoxLayoutHeaderBodyFooter(t *testing.T) {
+	h := toolkit.NewLabel("H")
+	b := toolkit.NewLabel("B")
+	f := toolkit.NewLabel("F")
+	p := &packedVBox{header: h, body: b, footer: f, headerH: 1, footerH: 1}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 80, H: 30})
+
+	if got := h.Bounds(); got.Y != 0 || got.H != 1 || got.W != 80 {
+		t.Errorf("header bounds = %+v, want (0,0,80,1)", got)
+	}
+	if got := f.Bounds(); got.Y != 29 || got.H != 1 || got.W != 80 {
+		t.Errorf("footer bounds = %+v, want (0,29,80,1)", got)
+	}
+	if got := b.Bounds(); got.Y != 1 || got.H != 28 || got.W != 80 {
+		t.Errorf("body bounds = %+v, want (0,1,80,28)", got)
+	}
+}
+func TestPackedVBoxHandlesNilChildren(t *testing.T) {
+	p := &packedVBox{}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+	p.OnEvent(toolkit.Event{})
+}
+func TestPackedVBoxDrawAllChildren(t *testing.T) {
+	h := toolkit.NewLabel("H")
+	b := toolkit.NewLabel("B")
+	f := toolkit.NewLabel("F")
+	p := &packedVBox{header: h, body: b, footer: f, headerH: 1, footerH: 1}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
+	tv := toolkit.NewTextView("")
+	tv.Focused = true
+	p := &packedVBox{body: tv}
+	before := tv.Text()
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
+	if tv.Text() == before {
+		t.Fatal("event was not forwarded to body TextView")
 	}
 }
 

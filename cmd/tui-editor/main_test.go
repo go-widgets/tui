@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
 )
@@ -85,26 +86,27 @@ func TestSetModeUpdatesStateAndVisibility(t *testing.T) {
 
 // TestRefreshStatusFormatsSegments covers every branch of
 // refreshStatus: named vs unnamed file, dirty vs clean, and the
-// cursor-position formatter.
+// cursor-position formatter. Reads the flat Label.Text string that
+// replaced the Statusbar's Segments slice in the v0.3.2 layout fix.
 func TestRefreshStatusFormatsSegments(t *testing.T) {
 	s := newState()
 	s.refreshStatus()
-	if s.statusbar.Segments[0] != "VIEW" {
-		t.Errorf("mode segment = %q, want VIEW", s.statusbar.Segments[0])
+	if !strings.Contains(s.statusbar.Text, "VIEW") {
+		t.Errorf("status text missing VIEW: %q", s.statusbar.Text)
 	}
-	if s.statusbar.Segments[1] != "*scratch*" {
-		t.Errorf("file segment on unnamed buffer = %q, want *scratch*", s.statusbar.Segments[1])
+	if !strings.Contains(s.statusbar.Text, "*scratch*") {
+		t.Errorf("status text missing *scratch*: %q", s.statusbar.Text)
 	}
 
 	s.file = "notes.md"
 	s.dirty = true
 	s.tv.CursorLine, s.tv.CursorCol = 4, 6
 	s.refreshStatus()
-	if s.statusbar.Segments[1] != "notes.md [+]" {
-		t.Errorf("file segment on dirty buffer = %q, want notes.md [+]", s.statusbar.Segments[1])
+	if !strings.Contains(s.statusbar.Text, "notes.md [+]") {
+		t.Errorf("status text missing notes.md [+]: %q", s.statusbar.Text)
 	}
-	if s.statusbar.Segments[2] != "5:7" {
-		t.Errorf("cursor segment = %q, want 5:7 (1-indexed)", s.statusbar.Segments[2])
+	if !strings.Contains(s.statusbar.Text, "5:7") {
+		t.Errorf("status text missing 5:7 (1-indexed cursor): %q", s.statusbar.Text)
 	}
 }
 
@@ -517,6 +519,66 @@ func TestDefaultRunAppInvokesRun(t *testing.T) {
 	})
 	if code := defaultRunApp(a); code == 0 {
 		t.Fatal("defaultRunApp against an openTTY-error App returned 0; want non-zero")
+	}
+}
+
+// TestPackedVBoxLayoutHeaderBodyFooter drives the local layout
+// helper directly: given a 80×30 bounds, header must land at y=0
+// with H=1, footer at y=29 with H=1, body between. Catches the
+// regression that shipped in v0.3.0 / v0.3.1 where a plain
+// toolkit.VBox distributed each child equally, wrecking the
+// interactive demo's chrome.
+func TestPackedVBoxLayoutHeaderBodyFooter(t *testing.T) {
+	h := toolkit.NewLabel("H")
+	b := toolkit.NewLabel("B")
+	f := toolkit.NewLabel("F")
+	p := &packedVBox{header: h, body: b, footer: f, headerH: 1, footerH: 1}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 80, H: 30})
+
+	if got := h.Bounds(); got.Y != 0 || got.H != 1 || got.W != 80 {
+		t.Errorf("header bounds = %+v, want (0,0,80,1)", got)
+	}
+	if got := f.Bounds(); got.Y != 29 || got.H != 1 || got.W != 80 {
+		t.Errorf("footer bounds = %+v, want (0,29,80,1)", got)
+	}
+	if got := b.Bounds(); got.Y != 1 || got.H != 28 || got.W != 80 {
+		t.Errorf("body bounds = %+v, want (0,1,80,28)", got)
+	}
+}
+
+// TestPackedVBoxHandlesNilChildren covers the nil-guard branches so
+// SetBounds / Draw / OnEvent never panic on partially-populated
+// helpers (a future demo may compose header + body without a footer).
+func TestPackedVBoxHandlesNilChildren(t *testing.T) {
+	p := &packedVBox{}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+	p.OnEvent(toolkit.Event{})
+}
+
+// TestPackedVBoxDrawAllChildren renders every child so their Draw
+// methods are covered through the layout helper's dispatch.
+func TestPackedVBoxDrawAllChildren(t *testing.T) {
+	h := toolkit.NewLabel("H")
+	b := toolkit.NewLabel("B")
+	f := toolkit.NewLabel("F")
+	p := &packedVBox{header: h, body: b, footer: f, headerH: 1, footerH: 1}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+
+// TestPackedVBoxForwardsEventsToBody covers the OnEvent forwarding
+// branch: an event delivered to packedVBox reaches the body widget.
+func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
+	tv := toolkit.NewTextView("")
+	tv.Focused = true
+	p := &packedVBox{body: tv}
+	before := tv.Text()
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
+	if tv.Text() == before {
+		t.Fatal("event was not forwarded to body TextView")
 	}
 }
 

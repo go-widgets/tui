@@ -32,6 +32,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
 )
@@ -90,8 +91,8 @@ type state struct {
 	notebook      *toolkit.Notebook
 	contentTV     *toolkit.TextView
 	infoLabel     *toolkit.Label
-	status        *toolkit.Statusbar
-	menuBar       *toolkit.MenuBar
+	status        *toolkit.Label
+	menuBar       *toolkit.Label
 	helpPopover   *toolkit.Popover
 	searchPopover *toolkit.Popover
 	root          toolkit.Widget
@@ -136,17 +137,14 @@ func newState() *state {
 	// Split: left pane = tree, right pane = notebook.
 	hpaned := toolkit.NewHPaned(tree, notebook)
 
-	// Chrome: MenuBar + Statusbar.
-	menuBar := toolkit.NewMenuBar()
-	menuBar.Names = []string{"File", "View", "Help"}
-	menuBar.Menus = []*toolkit.Menu{
-		toolkit.NewMenu([]toolkit.MenuItem{{Label: "Open"}, {Label: "Quit"}}),
-		toolkit.NewMenu([]toolkit.MenuItem{{Label: "Refresh"}}),
-		toolkit.NewMenu([]toolkit.MenuItem{{Label: "About"}}),
-	}
-	status := toolkit.NewStatusbar([]string{
-		"q: quit  ?: help  /: search  ↑↓: navigate",
-	})
+	// Chrome. The toolkit's MenuBar / Statusbar carry pixel-tuned pad
+	// constants (MenuBarH = 22, StatusbarH = 18) that are visually
+	// grotesque in a terminal frame. Use flat Labels instead: a
+	// 1-cell header line and a 1-cell footer line. The tree /
+	// notebook keep working since HPaned is a horizontal split of two
+	// widgets already sized by the packedVBox body slot.
+	menuBar := toolkit.NewLabel("File   View   Help")
+	status := toolkit.NewLabel("q: quit  ?: help  /: search  Up/Down: navigate")
 
 	// Overlays: help + search popovers, both hidden until toggled.
 	helpPopover := toolkit.NewPopover(toolkit.NewLabel(
@@ -156,11 +154,17 @@ func newState() *state {
 	searchPopover := toolkit.NewPopover(toolkit.NewSearchEntry(""))
 	searchPopover.Title = "Search"
 
-	// Compose: menuBar / hpaned / statusbar stacked vertically.
-	vbox := toolkit.NewVBox()
-	vbox.Append(menuBar)
-	vbox.Append(hpaned)
-	vbox.Append(status)
+	// Compose via packedVBox — header 1 row / body fills / footer 1 row.
+	// A plain toolkit.VBox would divide equally between the three
+	// children, which pushes MenuBar and Statusbar to a third of the
+	// screen each (bug that shipped in v0.3.0 / v0.3.1).
+	pv := &packedVBox{
+		header:  menuBar,
+		body:    hpaned,
+		footer:  status,
+		headerH: 1,
+		footerH: 1,
+	}
 
 	return &state{
 		tree:          tree,
@@ -171,8 +175,60 @@ func newState() *state {
 		menuBar:       menuBar,
 		helpPopover:   helpPopover,
 		searchPopover: searchPopover,
-		root:          vbox,
+		root:          pv,
 		files:         files,
+	}
+}
+
+// packedVBox lays out three children with fixed-height header +
+// footer and a body that fills the remaining vertical space. Suitable
+// for terminal-scale layouts where toolkit.VBox's equal-height
+// distribution would make every element unusably big. SetBounds
+// re-runs the layout at every resize; Draw paints in draw-order
+// (body first, then header + footer on top so overlays sit above);
+// OnEvent forwards to body (the main interactive area).
+type packedVBox struct {
+	toolkit.Base
+	header  toolkit.Widget
+	body    toolkit.Widget
+	footer  toolkit.Widget
+	headerH int
+	footerH int
+}
+
+func (p *packedVBox) SetBounds(r toolkit.Rect) {
+	p.Base.SetBounds(r)
+	if p.header != nil {
+		p.header.SetBounds(toolkit.Rect{X: r.X, Y: r.Y, W: r.W, H: p.headerH})
+	}
+	if p.footer != nil {
+		p.footer.SetBounds(toolkit.Rect{X: r.X, Y: r.Y + r.H - p.footerH, W: r.W, H: p.footerH})
+	}
+	if p.body != nil {
+		p.body.SetBounds(toolkit.Rect{
+			X: r.X,
+			Y: r.Y + p.headerH,
+			W: r.W,
+			H: r.H - p.headerH - p.footerH,
+		})
+	}
+}
+
+func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	if p.body != nil {
+		p.body.Draw(pnt, theme)
+	}
+	if p.header != nil {
+		p.header.Draw(pnt, theme)
+	}
+	if p.footer != nil {
+		p.footer.Draw(pnt, theme)
+	}
+}
+
+func (p *packedVBox) OnEvent(ev toolkit.Event) {
+	if p.body != nil {
+		p.body.OnEvent(ev)
 	}
 }
 

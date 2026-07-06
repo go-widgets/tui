@@ -42,6 +42,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
 )
@@ -120,8 +121,8 @@ type state struct {
 	file      string // "" == unnamed buffer
 	dirty     bool
 	tv        *toolkit.TextView
-	statusbar *toolkit.Statusbar
-	menuBar   *toolkit.MenuBar
+	statusbar *toolkit.Label
+	menuBar   *toolkit.Label
 	palette   *toolkit.Popover
 	paletteEn *toolkit.SearchEntry
 	root      toolkit.Widget
@@ -132,32 +133,30 @@ type state struct {
 	writeFile func(string, []byte, os.FileMode) error
 }
 
-// newState builds the widget tree — TextView at centre, MenuBar +
-// Statusbar as chrome, Popover-wrapped SearchEntry as the palette —
-// and wires it into a single VBox root.
+// newState builds the widget tree — TextView at centre with flat
+// Label chrome (menu-style header + status footer) — wired through
+// packedVBox so header + footer stay 1 cell tall and TextView takes
+// the remaining vertical space. A toolkit.VBox would divide equally,
+// giving each element a third of the screen — that layout bug
+// shipped in v0.3.0 / v0.3.1 and is what v0.3.2 fixes.
 func newState() *state {
 	tv := toolkit.NewTextView("")
 	tv.Focused = true
 
-	statusbar := toolkit.NewStatusbar([]string{"VIEW", "", "1:1"})
-
-	menuBar := toolkit.NewMenuBar()
-	menuBar.Names = []string{"File", "Edit", "View", "Help"}
-	menuBar.Menus = []*toolkit.Menu{
-		toolkit.NewMenu([]toolkit.MenuItem{{Label: "Save"}, {Label: "Quit"}}),
-		toolkit.NewMenu([]toolkit.MenuItem{{Label: "Enter edit mode"}}),
-		toolkit.NewMenu([]toolkit.MenuItem{{Label: "Command palette"}}),
-		toolkit.NewMenu([]toolkit.MenuItem{{Label: "About"}}),
-	}
+	menuBar := toolkit.NewLabel("File   Edit   View   Help")
+	statusbar := toolkit.NewLabel("VIEW  |  *scratch*  |  1:1")
 
 	paletteEn := toolkit.NewSearchEntry("")
 	palette := toolkit.NewPopover(paletteEn)
 	palette.Title = "Command palette"
 
-	vbox := toolkit.NewVBox()
-	vbox.Append(menuBar)
-	vbox.Append(tv)
-	vbox.Append(statusbar)
+	root := &packedVBox{
+		header:  menuBar,
+		body:    tv,
+		footer:  statusbar,
+		headerH: 1,
+		footerH: 1,
+	}
 
 	return &state{
 		mode:      modeView,
@@ -166,9 +165,58 @@ func newState() *state {
 		menuBar:   menuBar,
 		palette:   palette,
 		paletteEn: paletteEn,
-		root:      vbox,
+		root:      root,
 		readFile:  os.ReadFile,
 		writeFile: os.WriteFile,
+	}
+}
+
+// packedVBox — same shape as cmd/tui-explorer's local helper:
+// header (fixed) / body (expand) / footer (fixed). Suitable for
+// terminal-scale layouts where toolkit.VBox's equal-height split
+// would inflate the chrome to a third of the screen each.
+type packedVBox struct {
+	toolkit.Base
+	header  toolkit.Widget
+	body    toolkit.Widget
+	footer  toolkit.Widget
+	headerH int
+	footerH int
+}
+
+func (p *packedVBox) SetBounds(r toolkit.Rect) {
+	p.Base.SetBounds(r)
+	if p.header != nil {
+		p.header.SetBounds(toolkit.Rect{X: r.X, Y: r.Y, W: r.W, H: p.headerH})
+	}
+	if p.footer != nil {
+		p.footer.SetBounds(toolkit.Rect{X: r.X, Y: r.Y + r.H - p.footerH, W: r.W, H: p.footerH})
+	}
+	if p.body != nil {
+		p.body.SetBounds(toolkit.Rect{
+			X: r.X,
+			Y: r.Y + p.headerH,
+			W: r.W,
+			H: r.H - p.headerH - p.footerH,
+		})
+	}
+}
+
+func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	if p.body != nil {
+		p.body.Draw(pnt, theme)
+	}
+	if p.header != nil {
+		p.header.Draw(pnt, theme)
+	}
+	if p.footer != nil {
+		p.footer.Draw(pnt, theme)
+	}
+}
+
+func (p *packedVBox) OnEvent(ev toolkit.Event) {
+	if p.body != nil {
+		p.body.OnEvent(ev)
 	}
 }
 
@@ -184,7 +232,7 @@ func (s *state) refreshStatus() {
 		name += " [+]"
 	}
 	pos := fmt.Sprintf("%d:%d", s.tv.CursorLine+1, s.tv.CursorCol+1)
-	s.statusbar.Segments = []string{modeName(s.mode), name, pos}
+	s.statusbar.Text = fmt.Sprintf("%s  |  %s  |  %s", modeName(s.mode), name, pos)
 }
 
 // modeName returns the human-readable label for m, used in the
