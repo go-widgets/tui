@@ -10,31 +10,66 @@ import (
 	"io"
 	"strings"
 	"testing"
-
-	"github.com/go-widgets/toolkit"
 )
 
-// TestComposeCatalogueShape asserts every widget in the catalogue
-// has non-nil bounds set and no two widgets overlap on the same
-// (X, Y) origin cell — a lightweight collision check that catches
-// copy/paste bugs where a new entry inherited a sibling's Rect.
-func TestComposeCatalogueShape(t *testing.T) {
-	widgets := composeCatalogue()
-	if len(widgets) == 0 {
-		t.Fatal("composeCatalogue returned zero widgets")
+// TestEntriesShape verifies every entry has a non-empty name, positive
+// dims and a non-nil make() that returns a non-nil widget. Guards
+// against copy/paste bugs where an entry inherited a sibling's dims
+// or forgot its factory.
+func TestEntriesShape(t *testing.T) {
+	all := entries()
+	if len(all) == 0 {
+		t.Fatal("entries() returned zero widgets")
 	}
-	seen := map[[2]int]bool{}
-	for i, w := range widgets {
-		b := w.Bounds()
-		if b.W <= 0 || b.H <= 0 {
-			t.Errorf("widget %d: non-positive dims %d×%d", i, b.W, b.H)
+	seen := map[string]bool{}
+	for i, e := range all {
+		if e.name == "" {
+			t.Errorf("entry %d has empty name", i)
 		}
-		key := [2]int{b.X, b.Y}
-		if seen[key] {
-			t.Errorf("widget %d shares origin (%d,%d) with an earlier entry",
-				i, b.X, b.Y)
+		if seen[e.name] {
+			t.Errorf("entry %d has duplicate name %q", i, e.name)
 		}
-		seen[key] = true
+		seen[e.name] = true
+		if e.w <= 0 || e.h <= 0 {
+			t.Errorf("entry %q has non-positive dims %d×%d", e.name, e.w, e.h)
+		}
+		if e.make == nil {
+			t.Errorf("entry %q has nil make()", e.name)
+			continue
+		}
+		if w := e.make(); w == nil {
+			t.Errorf("entry %q make() returned nil", e.name)
+		}
+	}
+}
+
+// TestFindEntry covers both the found and not-found branches of the
+// name lookup helper.
+func TestFindEntry(t *testing.T) {
+	all := entries()
+	if _, ok := findEntry(all, "button"); !ok {
+		t.Fatal("findEntry(button) missing")
+	}
+	if _, ok := findEntry(all, "no-such-widget"); ok {
+		t.Fatal("findEntry(unknown) should have returned false")
+	}
+}
+
+// TestComposeAllShape asserts composeAll produces two widgets per
+// entry (caption + widget) and computes frame dims that fit the
+// composition (rows large enough for every entry).
+func TestComposeAllShape(t *testing.T) {
+	all := entries()
+	widgets, cols, rows := composeAll(all)
+	if got, want := len(widgets), 2*len(all); got != want {
+		t.Errorf("composeAll returned %d widgets, want %d (caption + widget per entry)", got, want)
+	}
+	if cols < 2*slotW {
+		t.Errorf("frame cols %d < 2*slotW %d — layout does not fit both columns", cols, 2*slotW)
+	}
+	expectRows := ((len(all) + gridCols - 1) / gridCols) * (captionH + slotH)
+	if rows != expectRows {
+		t.Errorf("frame rows %d, want %d", rows, expectRows)
 	}
 }
 
@@ -50,10 +85,10 @@ func TestRunDefaultThemeSucceeds(t *testing.T) {
 
 func TestRunLightVsDarkDiffers(t *testing.T) {
 	var lightOut, darkOut bytes.Buffer
-	if code := run([]string{"--theme=light", "--cols=100", "--rows=20"}, &lightOut, io.Discard); code != 0 {
+	if code := run([]string{"--theme=light", "--cols=118", "--rows=30"}, &lightOut, io.Discard); code != 0 {
 		t.Fatalf("light run() = %d, want 0", code)
 	}
-	if code := run([]string{"--theme=dark", "--cols=100", "--rows=20"}, &darkOut, io.Discard); code != 0 {
+	if code := run([]string{"--theme=dark", "--cols=118", "--rows=30"}, &darkOut, io.Discard); code != 0 {
 		t.Fatalf("dark run() = %d, want 0", code)
 	}
 	if lightOut.String() == darkOut.String() {
@@ -69,9 +104,55 @@ func TestRunExplicitSize(t *testing.T) {
 	if stdout.Len() == 0 {
 		t.Fatal("explicit-size run should have produced output")
 	}
-	// ANSI stream must contain SGR reset sequences at frame end.
 	if !strings.Contains(stdout.String(), "\x1b[0m") {
 		t.Fatal("output missing ANSI SGR reset — likely not a valid frame")
+	}
+}
+
+// TestRunList exercises the --list flag: exits 0, writes the widget
+// names (one per line) to stdout, and includes at least a known
+// sentinel like "button".
+func TestRunList(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(--list) = %d, want 0", code)
+	}
+	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	if len(lines) != len(entries()) {
+		t.Errorf("--list printed %d lines, want %d (one per entry)", len(lines), len(entries()))
+	}
+	found := false
+	for _, l := range lines {
+		if l == "button" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("--list output missing sentinel 'button'")
+	}
+}
+
+// TestRunWidgetSingle exercises --widget=NAME with a known name.
+func TestRunWidgetSingle(t *testing.T) {
+	var stdout bytes.Buffer
+	if code := run([]string{"--widget=alert"}, &stdout, io.Discard); code != 0 {
+		t.Fatalf("run(--widget=alert) = %d, want 0", code)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("--widget render produced no output")
+	}
+}
+
+// TestRunWidgetUnknown covers the exit-code-3 branch when the
+// --widget argument names an entry that doesn't exist.
+func TestRunWidgetUnknown(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--widget=no-such-thing"}, &stdout, &stderr); code != 3 {
+		t.Fatalf("run(--widget=unknown) = %d, want 3", code)
+	}
+	if !strings.Contains(stderr.String(), "unknown widget") {
+		t.Fatalf("stderr missing 'unknown widget' hint: %q", stderr.String())
 	}
 }
 
@@ -102,8 +183,7 @@ func TestRunRenderErrorReturnsOne(t *testing.T) {
 }
 
 // TestMainSuccessPath drives main() via the runFunc/osExit seams so
-// coverage picks up the four statements inside main without
-// actually exiting the test binary.
+// the four statements inside main are covered.
 func TestMainSuccessPath(t *testing.T) {
 	origRun, origExit := runFunc, osExit
 	defer func() { runFunc, osExit = origRun, origExit }()
@@ -125,20 +205,5 @@ func TestMainErrorPath(t *testing.T) {
 	main()
 	if gotCode != 7 {
 		t.Fatalf("main() called osExit(%d), want 7", gotCode)
-	}
-}
-
-// TestComposeCatalogueEveryEntryIsAToolkitWidget verifies the slice
-// is typed correctly at compile time (already), plus that every
-// entry's Bounds is inside a reasonable envelope so a 100x20-ish
-// terminal renders the whole composition.
-func TestComposeCatalogueEveryEntryIsAToolkitWidget(t *testing.T) {
-	widgets := composeCatalogue()
-	for i, w := range widgets {
-		var _ toolkit.Widget = w // compile-time check
-		b := w.Bounds()
-		if b.X < 0 || b.Y < 0 {
-			t.Errorf("widget %d: negative origin (%d,%d)", i, b.X, b.Y)
-		}
 	}
 }
