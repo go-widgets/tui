@@ -65,6 +65,13 @@ type App struct {
 	rows     int
 	exitCode int
 
+	// consumed is set by [App.Consume] from inside a Keys handler to
+	// signal that the current event should NOT propagate to Root.
+	// The event loop resets it to false at the top of every event
+	// dispatch so a stale value from a previous event never leaks
+	// forward.
+	consumed bool
+
 	// seams — swapped by tests to bypass every OS-touching call.
 	openTTYFn func(*os.File) (TTY, error)
 	stdinFn   func() io.Reader
@@ -164,6 +171,19 @@ func (a *App) SetOpenTTYFn(fn func(*os.File) (TTY, error)) {
 	a.openTTYFn = fn
 }
 
+// Consume tells the event loop that the current Keys handler fully
+// handled the event and it must NOT propagate to Root.OnEvent.
+// Without Consume, every key that matches a Keys handler also
+// reaches Root — which is fine for global shortcuts (Ctrl+C to quit
+// still lets the Root repaint from its own state), but wrong for
+// mode-switching editors where pressing 'i' to enter edit mode
+// would otherwise ALSO insert 'i' into the underlying TextView.
+//
+// Idempotent within a single event dispatch. The event loop clears
+// the flag at the top of every event so a Consume from a previous
+// event never affects the next one.
+func (a *App) Consume() { a.consumed = true }
+
 // Refresh marks the frame dirty so the next iteration repaints. It
 // also nudges the wake channel so a loop currently blocked in select
 // unblocks — enabling async I/O goroutines to schedule a redraw
@@ -261,10 +281,11 @@ loop:
 		select {
 		case b := <-inCh:
 			for _, ev := range a.parser.Feed(b) {
+				a.consumed = false
 				if h, ok := a.Keys[ev.Code]; ok {
 					h(a)
 				}
-				if a.Root != nil {
+				if !a.consumed && a.Root != nil {
 					a.Root.OnEvent(ev)
 				}
 			}

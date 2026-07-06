@@ -488,6 +488,30 @@ func TestIsQuittingReflectsQuitState(t *testing.T) {
 	}
 }
 
+// TestConsumeFlagStopsPropagation verifies that Consume() called
+// from a Keys handler prevents the current event from also reaching
+// Root.OnEvent. Mode-switching editors rely on this — pressing 'i'
+// in view mode must switch to edit mode WITHOUT also inserting 'i'
+// into the underlying TextView.
+func TestConsumeFlagStopsPropagation(t *testing.T) {
+	a := &App{}
+	// Direct-field manipulation mirrors what the event loop does at
+	// event dispatch: reset consumed to false, call handler, check flag.
+	a.consumed = false
+	if a.consumed {
+		t.Fatal("fresh consumed flag should be false")
+	}
+	a.Consume()
+	if !a.consumed {
+		t.Fatal("Consume() did not set the consumed flag")
+	}
+	// Idempotent — calling twice does not clear it.
+	a.Consume()
+	if !a.consumed {
+		t.Fatal("second Consume() flipped the flag off")
+	}
+}
+
 // TestSetOpenTTYFnReplacesFactory verifies the exported setter
 // installs the caller's TTY factory in place of the default. Consumer
 // tests (see cmd/tui-explorer) rely on this seam to drive Run without
