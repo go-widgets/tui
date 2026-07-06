@@ -4,17 +4,17 @@
 
 //go:build unix && integration
 
-// End-to-end integration test that builds cmd/tui-explorer, spawns
-// it under a real pty, writes real key bytes, and asserts on the
-// rendered frame after ANSI stripping.
+// End-to-end integration tests using cell-level assertions.
 //
-// This is the test that would have caught the v0.3.0 / v0.3.1
-// layout regression (MenuBar and Statusbar consuming a third of the
-// screen each). The regular unit tests run under a stubbed event
-// loop with fake TTYs, so the real Root.SetBounds → children
-// distribution path never executed. The integration build tag keeps
-// this slow(-ish) test out of the default `go test ./...` run;
-// enable it explicitly with `go test -tags integration ./...`.
+// The v0.3.2 through v0.3.5 patches all shipped bugs that would
+// have been caught by the assertions here — but the OLD e2e tests
+// stripped ANSI colors before asserting, so every visual bug (wrong
+// row background, block-char glyphs, clipped text) slipped through.
+//
+// The new discipline: decode the pty output into a TermGrid, then
+// assert on specific cells' Rune + Fg + Bg. Text-content assertions
+// stay via TermGrid.RowText, but the color / rune assertions are
+// what catch the bugs that would otherwise ship.
 
 package main
 
@@ -23,83 +23,35 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/go-widgets/tui"
 )
 
-// TestExplorerRendersHeaderAndFooterInPty builds the binary,
-// spawns it under a pty sized to 30 rows × 80 cols, writes 'q' to
-// quit, captures the first ~200 ms of output, and asserts that the
-// header + footer land at row 0 and row 29 respectively — the very
-// property the v0.3.0 / v0.3.1 layout bug broke.
-func TestExplorerRendersHeaderAndFooterInPty(t *testing.T) {
+// Theme constants — must match toolkit.DefaultLight() so assertions
+// don't drift when the theme rotates. Values verified from
+// toolkit/theme.go's DefaultLight function to avoid the "assumed
+// brand teal" mistake I made in the first draft (the ACTUAL default
+// light Accent is Adwaita blue #3584E4).
+const (
+	lightBgR, lightBgG, lightBgB             = 0xFA, 0xFA, 0xFA // theme.Background
+	lightSurfaceR, lightSurfaceG, lightSuB   = 0xE8, 0xEA, 0xED // theme.Surface
+	lightAccentR, lightAccentG, lightAccentB = 0x35, 0x84, 0xE4 // theme.Accent (Adwaita blue)
+)
+
+// captureFrame spawns the explorer under a pty sized cols×rows, sends
+// the given key stream after a settle delay, waits up to timeout for
+// the process to exit, and returns the decoded TermGrid. Standard
+// harness for every cell-level test.
+func captureFrame(t *testing.T, cols, rows int, keys string, timeout time.Duration) *tui.TermGrid {
+	t.Helper()
 	bin := buildBinary(t)
 
 	c := exec.Command(bin)
-	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
-	if err != nil {
-		t.Skipf("pty unavailable: %v", err)
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	// Quit after the initial render.
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		_, _ = ptmx.Write([]byte("q"))
-	}()
-
-	var buf bytes.Buffer
-	done := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&buf, ptmx)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("binary did not exit within 3s of receiving 'q'")
-	}
-	_ = c.Wait()
-
-	// Strip ANSI + split into rows.
-	stripped := stripANSI(buf.Bytes())
-	rows := splitRows(stripped)
-	if len(rows) < 30 {
-		t.Fatalf("got %d rendered rows, want ≥ 30\n---raw---\n%s", len(rows), stripped)
-	}
-
-	// Row 0 (header) must contain the header label. Row 29 (footer)
-	// must contain the status label. If a plain VBox distributed
-	// equally, "File" would land at row ~8 and "q: quit" at row ~20
-	// — the regression's fingerprint.
-	if !strings.Contains(rows[0], "File") {
-		t.Errorf("row 0 (header) missing 'File': %q", rows[0])
-	}
-	if !strings.Contains(rows[29], "q: quit") {
-		t.Errorf("row 29 (footer) missing 'q: quit': %q", rows[29])
-	}
-}
-
-// TestExplorerHelpToggleInPty exercises the real interactive
-// cycle: press '?', verify the help popover contents appear in the
-// rendered frame, press '?' again to hide, press 'q' to quit. If
-// the key handler swallowed the event but Consume wasn't wired
-// correctly, or if the popover render path is broken in cell mode,
-// this test would fail loud.
-//
-// This is the missing interactive verification: the header/footer
-// layout test proves the initial frame is correct, but doesn't
-// exercise any key handler beyond quit.
-func TestExplorerHelpToggleInPty(t *testing.T) {
-	bin := buildBinary(t)
-
-	c := exec.Command(bin)
-	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	if err != nil {
 		t.Skipf("pty unavailable: %v", err)
 	}
@@ -112,80 +64,222 @@ func TestExplorerHelpToggleInPty(t *testing.T) {
 		close(captureDone)
 	}()
 
-	write := func(s string) {
-		time.Sleep(120 * time.Millisecond)
-		_, _ = ptmx.Write([]byte(s))
-	}
-	write("?") // toggle help popover on
-	write("q") // quit
-
-	select {
-	case <-captureDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("binary did not exit within 5s of receiving 'q'")
-	}
-	_ = c.Wait()
-
-	stripped := stripANSI(buf.Bytes())
-	// The help popover renders a Label with the "Enter: open" hint
-	// that isn't in the always-visible footer. Its appearance means
-	// the '?' key toggled visibility AND the popover rendered.
-	if !strings.Contains(stripped, "Enter: open") {
-		t.Fatalf("help popover 'Enter: open' hint never appeared after '?'.\n---captured---\n%s", stripped)
-	}
-}
-
-// TestExplorerArrowNavigationInPty exercises the full user cycle:
-// press Down twice, verify the third file's content ("/docs/README.md"
-// = "# Project ...") appears in the right pane, press q to quit. If
-// the arrow-key handlers stopped syncing content OR the fileList
-// stopped highlighting the selected row OR the right pane stopped
-// repainting, this test catches all three.
-func TestExplorerArrowNavigationInPty(t *testing.T) {
-	bin := buildBinary(t)
-
-	c := exec.Command(bin)
-	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
-	if err != nil {
-		t.Skipf("pty unavailable: %v", err)
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	var buf bytes.Buffer
-	captureDone := make(chan struct{})
+	// Feed the key stream one byte at a time with a small inter-key
+	// delay so the App loop repaints between mutations.
 	go func() {
-		_, _ = io.Copy(&buf, ptmx)
-		close(captureDone)
+		time.Sleep(200 * time.Millisecond)
+		for i := 0; i < len(keys); i++ {
+			_, _ = ptmx.Write([]byte{keys[i]})
+			time.Sleep(80 * time.Millisecond)
+		}
 	}()
 
-	write := func(s string) {
-		time.Sleep(120 * time.Millisecond)
-		_, _ = ptmx.Write([]byte(s))
-	}
-	write("\x1b[B") // Down arrow
-	write("\x1b[B") // Down arrow again -> index 2 = /docs/README.md
-	write("q")
-
 	select {
 	case <-captureDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("binary did not exit within 5s of 'q'")
+	case <-time.After(timeout):
+		t.Fatal("binary did not exit within timeout")
 	}
 	_ = c.Wait()
 
-	stripped := stripANSI(buf.Bytes())
-	// After two Downs, the right pane must show README.md's content
-	// (starts with "# Project"). If arrow navigation is broken, we
-	// only see the file at index 0 (/src/main.go = "package main").
-	if !strings.Contains(stripped, "# Project") {
-		t.Fatalf("arrow navigation did not sync content to /docs/README.md\n---captured---\n%s", stripped)
+	return tui.DecodeANSI(buf.Bytes(), cols, rows)
+}
+
+// findLastFrame returns the last complete frame (up to the last
+// "cursor-home" CSI). A tui.App run may emit multiple frames over
+// its lifetime; assertions want the FINAL one after all input.
+func findLastFrame(raw []byte, cols, rows int) *tui.TermGrid {
+	// Find last "\x1b[H" (home cursor) — every frame in tui.App
+	// starts with that. If we split there, the tail is the frame
+	// active at exit-time.
+	idx := bytes.LastIndex(raw, []byte("\x1b[H"))
+	if idx < 0 {
+		return tui.DecodeANSI(raw, cols, rows)
+	}
+	return tui.DecodeANSI(raw[idx:], cols, rows)
+}
+
+// -----------------------------------------------------------------
+// v0.3.2 regression — VBox equal-height split
+// -----------------------------------------------------------------
+
+// TestExplorerHeaderIsAtRow0AndFooterAtLastRow catches the v0.3.0 /
+// v0.3.1 layout bug where VBox split the three children equally,
+// pushing chrome to a third of the screen each.
+func TestExplorerHeaderIsAtRow0AndFooterAtLastRow(t *testing.T) {
+	g := captureFrame(t, 80, 30, "q", 3*time.Second)
+	if !strings.Contains(g.RowText(0), "File") {
+		t.Fatalf("row 0 (header) missing 'File': %q", g.RowText(0))
+	}
+	if !strings.Contains(g.RowText(29), "q: quit") {
+		t.Fatalf("row 29 (footer) missing 'q: quit': %q", g.RowText(29))
 	}
 }
 
-// buildBinary compiles cmd/tui-explorer into a t.TempDir binary and
-// returns its absolute path. Uses `go build` so the actual entry
-// point + `//go:build unix` are honored, unlike a package-import
-// test which never runs main().
+// -----------------------------------------------------------------
+// v0.3.3 regression — help popover never drawn
+// -----------------------------------------------------------------
+
+// TestExplorerHelpPopoverActuallyRendersOnQuestionMark catches the
+// v0.3.2 bug where '?' toggled Visible but the popover was never
+// added to the widget tree, so nothing painted.
+func TestExplorerHelpPopoverActuallyRendersOnQuestionMark(t *testing.T) {
+	g := captureFrame(t, 80, 30, "?q", 3*time.Second)
+	// "Enter: open" appears only in the help popover Label, not in
+	// the always-visible footer. Its presence proves the popover
+	// actually rendered.
+	found := false
+	for y := 0; y < g.Rows; y++ {
+		if strings.Contains(g.RowText(y), "Enter: open") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		var dump strings.Builder
+		for y := 0; y < g.Rows; y++ {
+			dump.WriteString(g.RowText(y))
+			dump.WriteByte('\n')
+		}
+		t.Fatalf("'Enter: open' (help popover content) never rendered:\n%s", dump.String())
+	}
+}
+
+// -----------------------------------------------------------------
+// v0.3.5 regression — fileList highlight was █ chars
+// -----------------------------------------------------------------
+
+// TestExplorerSelectedRowHasAccentBackground catches the v0.3.4 bug
+// where fileList used PutPixel for the selected-row highlight,
+// which in cell mode wrote '█' chars instead of setting the cell
+// background color. Assertion: row 1 (selected /src/main.go) cells
+// must have Bg = theme.Accent AND rune != '█'.
+func TestExplorerSelectedRowHasAccentBackground(t *testing.T) {
+	g := captureFrame(t, 80, 30, "q", 3*time.Second)
+
+	// Row 1 = selected /src/main.go. Sample a cell in the middle of
+	// the highlight strip (past the leading space, inside the name).
+	c := g.At(3, 1) // '/src/main.go' starts at col 1
+	if !c.Bg.Set {
+		t.Fatalf("row 1 col 3: no bg color set — highlight not applied. cell=%+v", c)
+	}
+	if c.Bg.R != lightAccentR || c.Bg.G != lightAccentG || c.Bg.B != lightAccentB {
+		t.Fatalf("row 1 col 3 bg = (%d,%d,%d), want accent (%d,%d,%d)",
+			c.Bg.R, c.Bg.G, c.Bg.B,
+			lightAccentR, lightAccentG, lightAccentB)
+	}
+	// The KEY assertion — no '█' char, which was v0.3.4's bug.
+	for x := 0; x < 24; x++ {
+		if g.At(x, 1).Rune == '█' {
+			t.Fatalf("row 1 col %d contains '█' block char — PutPixel-in-cell-mode bug. cell=%+v",
+				x, g.At(x, 1))
+		}
+	}
+}
+
+// TestExplorerSelectedRowNameStillReadable — a stronger form: not
+// only must the background be accent AND runes not be '█', but the
+// filename must still be readable in the highlighted row.
+func TestExplorerSelectedRowNameStillReadable(t *testing.T) {
+	g := captureFrame(t, 80, 30, "q", 3*time.Second)
+	if !strings.Contains(g.RowText(1), "/src/main.go") {
+		t.Fatalf("selected row 1 does not contain '/src/main.go': %q", g.RowText(1))
+	}
+}
+
+// -----------------------------------------------------------------
+// v0.3.5 regression — TextView showed only 2 lines out of 3
+// -----------------------------------------------------------------
+
+// TestExplorerContentPreviewShowsAllLinesWithoutClipping catches the
+// v0.3.4 bug where toolkit.TextView used lineH=11 in cell mode so a
+// 22-row body only showed 2 of the 3 file lines. Assertion: all 3
+// lines of /src/main.go must land on distinct rows in the right pane.
+func TestExplorerContentPreviewShowsAllLinesWithoutClipping(t *testing.T) {
+	g := captureFrame(t, 80, 30, "q", 3*time.Second)
+
+	// /src/main.go contents: "package main\n\nfunc main() {}\n"
+	// After the v0.3.5 fix, all 3 lines land as 3 rows (with the
+	// middle row blank).
+	var packageRow, funcRow int
+	packageRow, funcRow = -1, -1
+	for y := 0; y < g.Rows; y++ {
+		text := g.RowText(y)
+		if strings.Contains(text, "package main") {
+			packageRow = y
+		}
+		if strings.Contains(text, "func main") {
+			funcRow = y
+		}
+	}
+	if packageRow < 0 {
+		t.Fatal("'package main' never rendered in the content pane")
+	}
+	if funcRow < 0 {
+		t.Fatal("'func main() {}' never rendered — TextView clipped it (v0.3.4 bug)")
+	}
+	if funcRow-packageRow != 2 {
+		t.Errorf("expected 2-row gap between package + func lines, got packageRow=%d funcRow=%d",
+			packageRow, funcRow)
+	}
+}
+
+// -----------------------------------------------------------------
+// v0.3.4 regression — arrow key navigation
+// -----------------------------------------------------------------
+
+// TestExplorerArrowDownSyncsContent — pressing Down twice must
+// select the third file (index 2 = /docs/README.md), and its
+// content ("# Project") must appear in the right pane. If arrow
+// handlers stopped mutating state OR syncContent stopped firing OR
+// the right pane stopped repainting, one of the three assertions
+// fails.
+func TestExplorerArrowDownSyncsContent(t *testing.T) {
+	// Two Down arrows = 6 bytes (each is ESC [ B).
+	g := captureFrame(t, 80, 30, "\x1b[B\x1b[Bq", 5*time.Second)
+
+	// Row 3 = third fileList entry = /docs/README.md.
+	if !strings.Contains(g.RowText(3), "/docs/README.md") {
+		t.Errorf("row 3 = %q, want '/docs/README.md'", g.RowText(3))
+	}
+	// The selected row must have the accent background NOW at
+	// row 3 (not row 1) — confirms the highlight moved.
+	c := g.At(3, 3)
+	if !c.Bg.Set || c.Bg.R != lightAccentR {
+		t.Errorf("row 3 highlight not applied after 2×Down. cell=%+v", c)
+	}
+	// The right pane must show README.md's content.
+	found := false
+	for y := 0; y < g.Rows; y++ {
+		if strings.Contains(g.RowText(y), "# Project") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("right pane never showed '# Project' after 2×Down — syncContent didn't fire")
+	}
+}
+
+// -----------------------------------------------------------------
+// Meta — the failure-mode assertions catch the specific bugs
+// -----------------------------------------------------------------
+
+// TestExplorerNoBlockCharsAnywhere is a scan of the whole grid: no
+// cell should contain '█' unless it was intentional (there are no
+// intentional block chars in this composition). Would loud-fail on
+// any future regression that re-introduces PutPixel-as-background.
+func TestExplorerNoBlockCharsAnywhere(t *testing.T) {
+	g := captureFrame(t, 80, 30, "q", 3*time.Second)
+	for y := 0; y < g.Rows; y++ {
+		for x := 0; x < g.Cols; x++ {
+			if g.At(x, y).Rune == '█' {
+				t.Errorf("block char '█' at (%d,%d) — cell background misused as glyph",
+					x, y)
+			}
+		}
+	}
+}
+
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -197,10 +291,5 @@ func buildBinary(t *testing.T) string {
 	return bin
 }
 
-var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
-
-func stripANSI(b []byte) string { return ansiRE.ReplaceAllString(string(b), "") }
-
-func splitRows(s string) []string {
-	return strings.Split(s, "\n")
-}
+// findLastFrame kept exported (via _ =) for downstream refactor.
+var _ = findLastFrame
