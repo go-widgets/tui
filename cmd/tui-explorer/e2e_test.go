@@ -280,6 +280,114 @@ func TestExplorerNoBlockCharsAnywhere(t *testing.T) {
 	}
 }
 
+// TestExplorerBodyChromeContrastIsPerceptible asserts that the body
+// area and the chrome rows (header/footer) have visibly distinct
+// background colors — luminance difference ≥ 8 on a 0..255 scale.
+// A pixel-value equality assertion PASSES if bg values are
+// technically different (e.g. Surface #1F2228 vs Background #14161A —
+// 12 luminance units apart but visually indistinguishable). This
+// stronger assertion mandates a THRESHOLD that keeps a human eye
+// able to see the panel boundary.
+//
+// Catches the v0.3.7 "all-dark screen in Terminal.app" bug where
+// the body used Surface and chrome used Background — technically
+// different, but perceptually the same shade of near-black.
+func TestExplorerBodyChromeContrastIsPerceptible(t *testing.T) {
+	// Test in BOTH themes to catch a regression in either.
+	for _, tc := range []struct {
+		name   string
+		keys   string
+		darkTh bool
+	}{
+		{"light", "q", false},
+		{"dark", "q", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var g *tui.TermGrid
+			if tc.darkTh {
+				g = captureFrameWithArgs(t, 80, 30, tc.keys, 3*time.Second, "--theme=dark")
+			} else {
+				g = captureFrame(t, 80, 30, tc.keys, 3*time.Second)
+			}
+			// Row 0 = header (Background). Row 5 = body (SurfaceAlt).
+			chrome := g.At(0, 0).Bg
+			body := g.At(0, 5).Bg
+			if !chrome.Set || !body.Set {
+				t.Fatalf("chrome or body bg not set: chrome=%+v body=%+v", chrome, body)
+			}
+			diff := luminanceDiff(chrome, body)
+			if diff < 8 {
+				t.Fatalf("chrome/body luminance diff = %d, want ≥ 8 (%s theme): chrome=(%d,%d,%d) body=(%d,%d,%d)",
+					diff, tc.name,
+					chrome.R, chrome.G, chrome.B,
+					body.R, body.G, body.B)
+			}
+		})
+	}
+}
+
+// captureFrameWithArgs is captureFrame + extra args to the binary.
+func captureFrameWithArgs(t *testing.T, cols, rows int, keys string, timeout time.Duration, args ...string) *tui.TermGrid {
+	t.Helper()
+	bin := buildBinary(t)
+	c := exec.Command(bin, args...)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	captureDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, ptmx)
+		close(captureDone)
+	}()
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		for i := 0; i < len(keys); i++ {
+			_, _ = ptmx.Write([]byte{keys[i]})
+			time.Sleep(80 * time.Millisecond)
+		}
+	}()
+
+	select {
+	case <-captureDone:
+	case <-time.After(timeout):
+		t.Fatal("binary did not exit within timeout")
+	}
+	_ = c.Wait()
+	return tui.DecodeANSI(buf.Bytes(), cols, rows)
+}
+
+// luminanceDiff returns the max absolute difference across the three
+// RGB channels between two colors. A cheap perceptual proxy — real
+// luma weights would use 0.299*R + 0.587*G + 0.114*B, but for the
+// coarse "can a human see the boundary" check, max-channel-diff is
+// good enough (and doesn't require a floating-point path in a test).
+func luminanceDiff(a, b tui.Color) int {
+	dr := int(a.R) - int(b.R)
+	if dr < 0 {
+		dr = -dr
+	}
+	dg := int(a.G) - int(b.G)
+	if dg < 0 {
+		dg = -dg
+	}
+	db := int(a.B) - int(b.B)
+	if db < 0 {
+		db = -db
+	}
+	m := dr
+	if dg > m {
+		m = dg
+	}
+	if db > m {
+		m = db
+	}
+	return m
+}
+
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
