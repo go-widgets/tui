@@ -330,6 +330,28 @@ func TestTextPreviewDrawEmpty(t *testing.T) {
 	tp.Draw(pnt, toolkit.DefaultLight())
 }
 
+// cellPopover Draw tests.
+func TestCellPopoverDrawInvisibleIsNoop(t *testing.T) {
+	p := &cellPopover{Title: "T", Body: []string{"a", "b"}, Visible: false}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellPopoverDrawVisibleRendersTitleAndBody(t *testing.T) {
+	p := &cellPopover{Title: "T", Body: []string{"a", "b"}, Visible: true}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellPopoverDrawClampsBodyToBounds(t *testing.T) {
+	// Bounds too small for the full body: the loop must break at
+	// y >= r.Y+need-1.
+	p := &cellPopover{Title: "T", Body: []string{"a", "b", "c", "d"}, Visible: true}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 5}) // need=7, capped to H=5
+	pnt := painter.NewPixelPainter(make([]byte, 20*5*4), 20, 5)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+
 // packedVBox tests preserved from v0.3.3.
 func TestPackedVBoxLayoutHeaderBodyFooter(t *testing.T) {
 	h := toolkit.NewLabel("H")

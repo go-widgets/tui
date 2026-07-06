@@ -90,11 +90,55 @@ type state struct {
 	content       *textPreview
 	status        *toolkit.Label
 	menuBar       *toolkit.Label
-	helpPopover   *toolkit.Popover
-	searchPopover *toolkit.Popover
+	helpPopover   *cellPopover
+	searchPopover *cellPopover
 	root          *packedVBox
 	files         map[string]string
 	paths         []string // flat, order-stable list of file paths for fileList indexing
+}
+
+// cellPopover is a cell-native modal: title on row Y+0, body lines
+// starting at row Y+2 (title + 1-row gap), border box around
+// everything. Replaces toolkit.Popover whose PopoverPadY = 6 puts
+// the title 6 cells below the box top in cell mode + whose child
+// widget offset (~15+ cells) puts the body far below the title.
+type cellPopover struct {
+	toolkit.Base
+	Title   string
+	Body    []string
+	Visible bool
+}
+
+func (p *cellPopover) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	if !p.Visible {
+		return
+	}
+	r := p.Bounds()
+	// Tighten the drawn box to just enough rows for title + body.
+	need := 3 + len(p.Body) // border-top + title + gap + body + border-bot
+	if need > r.H {
+		need = r.H
+	}
+	// Distinct background so the overlay reads as a modal on top of
+	// the underlying surface.
+	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: need}, painter.RGBA{
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
+	})
+	// 1-cell border. StrokeRect draws box-drawing chars.
+	pnt.StrokeRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: need}, painter.RGBA{
+		R: theme.Border.R, G: theme.Border.G, B: theme.Border.B, A: theme.Border.A,
+	}, 1)
+	titleInk := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
+	toolkit.DrawText(pnt, r.X+2, r.Y+1, p.Title, titleInk)
+	// Body rows start at y=2 (title on 1, gap on... well no gap;
+	// title on 1, body 2..end).
+	for i, line := range p.Body {
+		y := r.Y + 2 + i
+		if y >= r.Y+need-1 {
+			break
+		}
+		toolkit.DrawText(pnt, r.X+2, y, line, titleInk)
+	}
 }
 
 // newState builds the interactive demo's widget tree. Cell-mode
@@ -128,12 +172,23 @@ func newState() *state {
 	menuBar := toolkit.NewLabel("File   View   Help")
 	status := toolkit.NewLabel("q: quit  ?: help  /: search  Up/Down: navigate  Enter: open")
 
-	helpPopover := toolkit.NewPopover(toolkit.NewLabel(
-		"q: quit  ?: help  /: search  Up/Down: navigate  Enter: open",
-	))
-	helpPopover.Title = "Help"
-	searchPopover := toolkit.NewPopover(toolkit.NewSearchEntry(""))
-	searchPopover.Title = "Search"
+	helpPopover := &cellPopover{
+		Title: "Help",
+		Body: []string{
+			"q          Quit",
+			"?          Toggle this help",
+			"/          Toggle search",
+			"Up / Down  Navigate file list",
+			"Enter      Refresh content pane",
+		},
+	}
+	searchPopover := &cellPopover{
+		Title: "Search",
+		Body: []string{
+			"(v0.3.x: overlay stub — real fuzzy",
+			"finder is planned for v0.4)",
+		},
+	}
 
 	pv := &packedVBox{
 		header:   menuBar,
