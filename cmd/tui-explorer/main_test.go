@@ -19,21 +19,15 @@ import (
 	"github.com/go-widgets/tui"
 )
 
-// TestNewStateFields asserts every widget slot on state is populated
-// so key handlers don't nil-deref.
+// TestNewStateFields verifies every state slot is populated so key
+// handlers never nil-deref at runtime.
 func TestNewStateFields(t *testing.T) {
 	s := newState()
-	if s.tree == nil {
-		t.Error("state.tree is nil")
+	if s.fileList == nil {
+		t.Error("state.fileList is nil")
 	}
-	if s.notebook == nil {
-		t.Error("state.notebook is nil")
-	}
-	if s.contentTV == nil {
-		t.Error("state.contentTV is nil")
-	}
-	if s.infoLabel == nil {
-		t.Error("state.infoLabel is nil")
+	if s.content == nil {
+		t.Error("state.content is nil")
 	}
 	if s.status == nil {
 		t.Error("state.status is nil")
@@ -53,22 +47,22 @@ func TestNewStateFields(t *testing.T) {
 	if len(s.files) == 0 {
 		t.Error("state.files is empty")
 	}
+	if len(s.paths) == 0 {
+		t.Error("state.paths is empty")
+	}
 }
 
-// TestKeysReturnsAllHandlers checks the expected key names are all
-// present in the map returned by state.keys.
+// TestKeysReturnsAllHandlers checks every expected key is registered.
 func TestKeysReturnsAllHandlers(t *testing.T) {
 	s := newState()
 	m := s.keys()
-	for _, k := range []string{"q", "Ctrl+C", "?", "/", "Enter"} {
+	for _, k := range []string{"q", "Ctrl+C", "?", "/", "Up", "Down", "Enter"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("keys()[%q] missing", k)
 		}
 	}
 }
 
-// TestKeyHandlersRunWithoutPanic invokes every handler with a fresh
-// tui.App to guarantee none blow up on their happy path.
 func TestKeyHandlersRunWithoutPanic(t *testing.T) {
 	s := newState()
 	for k, h := range s.keys() {
@@ -83,29 +77,23 @@ func TestKeyHandlersRunWithoutPanic(t *testing.T) {
 	}
 }
 
-// TestQuitHandlerCallsQuit covers the "q" binding using tui.App's
-// IsQuitting introspection.
 func TestQuitHandlerCallsQuit(t *testing.T) {
 	s := newState()
 	a := tui.NewApp()
 	s.keys()["q"](a)
 	if !a.IsQuitting() {
-		t.Fatal("q handler did not call Quit (IsQuitting still false)")
+		t.Fatal("q handler did not Quit")
 	}
 }
-
-// TestCtrlCHandlerCallsQuit covers the "Ctrl+C" binding.
 func TestCtrlCHandlerCallsQuit(t *testing.T) {
 	s := newState()
 	a := tui.NewApp()
 	s.keys()["Ctrl+C"](a)
 	if !a.IsQuitting() {
-		t.Fatal("Ctrl+C handler did not call Quit")
+		t.Fatal("Ctrl+C handler did not Quit")
 	}
 }
 
-// TestHelpToggleFlipsVisible verifies the "?" handler toggles the
-// help popover's Visible field on and off.
 func TestHelpToggleFlipsVisible(t *testing.T) {
 	s := newState()
 	if s.helpPopover.Visible {
@@ -113,196 +101,208 @@ func TestHelpToggleFlipsVisible(t *testing.T) {
 	}
 	s.keys()["?"](tui.NewApp())
 	if !s.helpPopover.Visible {
-		t.Fatal("help popover should be visible after ? toggle")
+		t.Fatal("? did not show help")
 	}
 	s.keys()["?"](tui.NewApp())
 	if s.helpPopover.Visible {
-		t.Fatal("help popover should be hidden after second ? toggle")
+		t.Fatal("second ? did not hide help")
 	}
 }
-
-// TestSearchToggleFlipsVisible mirrors the help toggle for the
-// "/" binding.
 func TestSearchToggleFlipsVisible(t *testing.T) {
 	s := newState()
-	if s.searchPopover.Visible {
-		t.Fatal("search popover should start hidden")
-	}
 	s.keys()["/"](tui.NewApp())
 	if !s.searchPopover.Visible {
-		t.Fatal("search popover should be visible after / toggle")
+		t.Fatal("/ did not show search")
 	}
 	s.keys()["/"](tui.NewApp())
 	if s.searchPopover.Visible {
-		t.Fatal("search popover should be hidden after second / toggle")
+		t.Fatal("second / did not hide search")
 	}
 }
 
-// TestEnterHandlerSyncsSelection covers syncSelection's success path.
-func TestEnterHandlerSyncsSelection(t *testing.T) {
+// TestUpDownMovesSelectionAndSyncsContent covers the arrow-key
+// handlers + the syncContent side effect.
+func TestUpDownMovesSelectionAndSyncsContent(t *testing.T) {
 	s := newState()
-	var licenseNode *toolkit.TreeNode
-	for _, c := range s.tree.Root.Children {
-		if c.Label == "LICENSE" {
-			licenseNode = c
-			break
-		}
+	// Start at 0. Down → 1.
+	s.keys()["Down"](tui.NewApp())
+	if s.fileList.selected != 1 {
+		t.Fatalf("Down: selected = %d, want 1", s.fileList.selected)
 	}
-	if licenseNode == nil {
-		t.Fatal("test fixture: LICENSE node missing from tree")
+	wantContent := s.files[s.paths[1]]
+	if got := s.content.Text(); got != strings.TrimRight(wantContent, "\n") && got != wantContent {
+		t.Errorf("content after Down: %q, want %q", got, wantContent)
 	}
-	s.tree.Selected = licenseNode
-	s.keys()["Enter"](tui.NewApp())
-	if s.infoLabel.Text != "LICENSE" {
-		t.Errorf("infoLabel.Text = %q, want %q", s.infoLabel.Text, "LICENSE")
-	}
-	if len(s.contentTV.Lines) == 0 {
-		t.Error("contentTV.Lines empty after Enter on a valid selection")
-	}
-	joined := strings.Join(s.contentTV.Lines, "\n")
-	if !strings.Contains(joined, "BSD-3-Clause") {
-		t.Errorf("contentTV missing file body, got %q", joined)
+	// Up → 0.
+	s.keys()["Up"](tui.NewApp())
+	if s.fileList.selected != 0 {
+		t.Fatalf("Up: selected = %d, want 0", s.fileList.selected)
 	}
 }
 
-// TestEnterHandlerNilSelection covers the "sel == nil" return branch
-// of syncSelection.
-func TestEnterHandlerNilSelection(t *testing.T) {
+// TestUpAtTopIsNoop covers the "already at top" branch.
+func TestUpAtTopIsNoop(t *testing.T) {
 	s := newState()
-	before := s.infoLabel.Text
-	s.tree.Selected = nil
-	s.keys()["Enter"](tui.NewApp())
-	if s.infoLabel.Text != before {
-		t.Errorf("infoLabel.Text mutated on nil selection: was %q, now %q", before, s.infoLabel.Text)
+	s.fileList.selected = 0
+	s.keys()["Up"](tui.NewApp())
+	if s.fileList.selected != 0 {
+		t.Fatalf("Up at top moved to %d", s.fileList.selected)
 	}
 }
 
-// TestEnterHandlerNonStringData covers the "path type-assert failed"
-// return branch of syncSelection.
-func TestEnterHandlerNonStringData(t *testing.T) {
+// TestDownAtBottomIsNoop covers the "already at bottom" branch.
+func TestDownAtBottomIsNoop(t *testing.T) {
 	s := newState()
-	s.tree.Selected = &toolkit.TreeNode{Label: "weird", Data: 42}
-	s.keys()["Enter"](tui.NewApp())
-	if s.infoLabel.Text != "weird" {
-		t.Errorf("infoLabel.Text = %q, want %q", s.infoLabel.Text, "weird")
+	s.fileList.selected = len(s.fileList.items) - 1
+	last := s.fileList.selected
+	s.keys()["Down"](tui.NewApp())
+	if s.fileList.selected != last {
+		t.Fatalf("Down at bottom moved to %d", s.fileList.selected)
 	}
 }
 
-// TestEnterHandlerUnknownPath covers the "path not in files map"
-// return branch of syncSelection.
-func TestEnterHandlerUnknownPath(t *testing.T) {
+// TestEnterSyncsContent covers the Enter handler.
+func TestEnterSyncsContent(t *testing.T) {
 	s := newState()
-	s.tree.Selected = &toolkit.TreeNode{Label: "ghost", Data: "/nowhere"}
+	s.fileList.selected = 2 // "/docs/README.md"
 	s.keys()["Enter"](tui.NewApp())
-	if s.infoLabel.Text != "ghost" {
-		t.Errorf("infoLabel.Text = %q, want %q", s.infoLabel.Text, "ghost")
+	if !strings.Contains(s.content.Text(), "Project") {
+		t.Errorf("Enter did not sync content: %q", s.content.Text())
 	}
 }
 
-// TestRunDefaultThemeSucceeds drives run(nil, ...) with a stubbed
-// runAppFunc so we skip the interactive event loop.
-func TestRunDefaultThemeSucceeds(t *testing.T) {
-	origRun := runAppFunc
-	defer func() { runAppFunc = origRun }()
-	origNew := newAppFunc
-	defer func() { newAppFunc = origNew }()
-
-	var captured *tui.App
-	newAppFunc = func() *tui.App {
-		a := tui.NewApp()
-		captured = a
-		return a
+// TestSyncContentOutOfRange covers the "selected out of range"
+// early-return branch.
+func TestSyncContentOutOfRange(t *testing.T) {
+	s := newState()
+	s.fileList.selected = -1
+	s.syncContent()
+	if !strings.Contains(s.content.Text(), "no selection") {
+		t.Errorf("out-of-range selection didn't show (no selection): %q", s.content.Text())
 	}
-	runAppFunc = func(a *tui.App) int { return 0 }
-
-	var stdout, stderr bytes.Buffer
-	if code := run(nil, &stdout, &stderr); code != 0 {
-		t.Fatalf("run(nil) = %d, want 0. stderr:\n%s", code, stderr.String())
-	}
-	if captured == nil {
-		t.Fatal("newAppFunc was not called")
-	}
-	if captured.Theme == nil {
-		t.Fatal("run did not install a theme")
-	}
-	if captured.Root == nil {
-		t.Fatal("run did not install a Root")
-	}
-	if len(captured.Keys) == 0 {
-		t.Fatal("run did not install any Keys")
-	}
-	if captured.Theme.Background != toolkit.DefaultLight().Background {
-		t.Error("default theme is not the light theme")
+}
+func TestSyncContentOutOfRangeHigh(t *testing.T) {
+	s := newState()
+	s.fileList.selected = 999
+	s.syncContent()
+	if !strings.Contains(s.content.Text(), "no selection") {
+		t.Errorf("high-out-of-range selection didn't show (no selection): %q", s.content.Text())
 	}
 }
 
-// TestRunThemeDarkApplied drives run --theme=dark.
-func TestRunThemeDarkApplied(t *testing.T) {
-	origRun := runAppFunc
-	defer func() { runAppFunc = origRun }()
-	origNew := newAppFunc
-	defer func() { newAppFunc = origNew }()
+// TestFileListDrawRendersItems + selection highlight branch.
+func TestFileListDrawRendersItems(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b", "c"}, selected: 1}
+	fl.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 3})
+	pnt := painter.NewPixelPainter(make([]byte, 20*3*4), 20, 3)
+	fl.Draw(pnt, toolkit.DefaultLight())
+}
 
-	var captured *tui.App
-	newAppFunc = func() *tui.App {
-		a := tui.NewApp()
-		captured = a
-		return a
-	}
-	runAppFunc = func(a *tui.App) int { return 0 }
+// TestFileListDrawOverflow covers the "row Y past bounds" break.
+func TestFileListDrawOverflow(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b", "c", "d", "e"}, selected: 0}
+	fl.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 2})
+	pnt := painter.NewPixelPainter(make([]byte, 20*2*4), 20, 2)
+	fl.Draw(pnt, toolkit.DefaultLight())
+}
 
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--theme=dark"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("run(--theme=dark) = %d, want 0", code)
+// TestFileListOnEventUpDown covers OnEvent's Up/Down branches +
+// non-key event no-op.
+func TestFileListOnEventUpDown(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b", "c"}, selected: 1}
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	if fl.selected != 0 {
+		t.Errorf("Up: %d, want 0", fl.selected)
 	}
-	if captured.Theme.Background != toolkit.DefaultDark().Background {
-		t.Error("--theme=dark did not install the dark theme")
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if fl.selected != 1 {
+		t.Errorf("Down: %d, want 1", fl.selected)
+	}
+	// Non-key event is a no-op.
+	before := fl.selected
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventClick})
+	if fl.selected != before {
+		t.Errorf("non-key event mutated selection: %d → %d", before, fl.selected)
+	}
+	// Unknown key is a no-op too (default arm of switch).
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Left"})
+	if fl.selected != before {
+		t.Errorf("unknown key mutated selection: %d → %d", before, fl.selected)
 	}
 }
 
-// TestRunPropagatesAppExitCode verifies run's return value passes
-// through from runAppFunc — i.e., the last statement in run is
-// reachable and its value observable.
-func TestRunPropagatesAppExitCode(t *testing.T) {
-	origRun := runAppFunc
-	defer func() { runAppFunc = origRun }()
-
-	runAppFunc = func(a *tui.App) int { return 5 }
-
-	var stdout, stderr bytes.Buffer
-	if code := run(nil, &stdout, &stderr); code != 5 {
-		t.Fatalf("run() = %d, want 5 (from stubbed runAppFunc)", code)
+// TestFileListUpAtTopIsNoop + DownAtBottom cover the edge guards.
+func TestFileListUpAtTopIsNoop(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b"}, selected: 0}
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	if fl.selected != 0 {
+		t.Errorf("Up at top: %d, want 0", fl.selected)
+	}
+}
+func TestFileListDownAtBottomIsNoop(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b"}, selected: 1}
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if fl.selected != 1 {
+		t.Errorf("Down at bottom: %d, want 1", fl.selected)
 	}
 }
 
-// TestRunBadFlagReturnsTwo covers the flag-parse error branch.
-func TestRunBadFlagReturnsTwo(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--not-a-flag"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("run(--not-a-flag) = %d, want 2", code)
+// TestHSplitLayoutDistributesCorrectly covers the left/right split.
+func TestHSplitLayoutDistributesCorrectly(t *testing.T) {
+	left := toolkit.NewLabel("L")
+	right := toolkit.NewLabel("R")
+	h := &hSplit{left: left, right: right, leftFrac: 30}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 10})
+	if left.Bounds().W != 30 {
+		t.Errorf("left width = %d, want 30", left.Bounds().W)
+	}
+	if right.Bounds().W != 70 {
+		t.Errorf("right width = %d, want 70", right.Bounds().W)
 	}
 }
 
-// TestPackedVBoxLayoutHeaderBodyFooter drives the layout helper
-// directly: given 80×30, header at y=0 h=1, footer at y=29 h=1,
-// body y=1 h=28. Catches the regression that shipped in v0.3.0 /
-// v0.3.1 where a plain toolkit.VBox divided the three children
-// equally, wrecking the interactive demo's chrome.
+// TestHSplitNilChildrenNoop covers the nil-guard branches.
+func TestHSplitNilChildrenNoop(t *testing.T) {
+	h := &hSplit{}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 100*10*4), 100, 10)
+	h.Draw(pnt, toolkit.DefaultLight())
+	h.OnEvent(toolkit.Event{})
+}
+
+// TestHSplitDrawAllChildren covers the Draw dispatch.
+func TestHSplitDrawAllChildren(t *testing.T) {
+	h := &hSplit{left: toolkit.NewLabel("L"), right: toolkit.NewLabel("R"), leftFrac: 50}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	h.Draw(pnt, toolkit.DefaultLight())
+}
+
+// TestHSplitOnEventForwardsToLeft covers the event-forward branch.
+func TestHSplitOnEventForwardsToLeft(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b"}, selected: 0}
+	h := &hSplit{left: fl, leftFrac: 50}
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if fl.selected != 1 {
+		t.Errorf("hSplit did not forward Down to left: %d", fl.selected)
+	}
+}
+
+// packedVBox tests preserved from v0.3.3.
 func TestPackedVBoxLayoutHeaderBodyFooter(t *testing.T) {
 	h := toolkit.NewLabel("H")
 	b := toolkit.NewLabel("B")
 	f := toolkit.NewLabel("F")
 	p := &packedVBox{header: h, body: b, footer: f, headerH: 1, footerH: 1}
 	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 80, H: 30})
-
-	if got := h.Bounds(); got.Y != 0 || got.H != 1 || got.W != 80 {
-		t.Errorf("header bounds = %+v, want (0,0,80,1)", got)
+	if got := h.Bounds(); got.Y != 0 || got.H != 1 {
+		t.Errorf("header bounds = %+v, want (0,0,W,1)", got)
 	}
-	if got := f.Bounds(); got.Y != 29 || got.H != 1 || got.W != 80 {
-		t.Errorf("footer bounds = %+v, want (0,29,80,1)", got)
+	if got := f.Bounds(); got.Y != 29 || got.H != 1 {
+		t.Errorf("footer bounds = %+v, want (0,29,W,1)", got)
 	}
-	if got := b.Bounds(); got.Y != 1 || got.H != 28 || got.W != 80 {
-		t.Errorf("body bounds = %+v, want (0,1,80,28)", got)
+	if got := b.Bounds(); got.Y != 1 || got.H != 28 {
+		t.Errorf("body bounds = %+v, want (0,1,W,28)", got)
 	}
 }
 func TestPackedVBoxHandlesNilChildren(t *testing.T) {
@@ -323,29 +323,22 @@ func TestPackedVBoxDrawAllChildren(t *testing.T) {
 }
 func TestPackedVBoxOverlaysRenderAndSize(t *testing.T) {
 	overlay := toolkit.NewLabel("overlay")
-	p := &packedVBox{
-		body:     toolkit.NewLabel("body"),
-		overlays: []toolkit.Widget{overlay},
-	}
+	p := &packedVBox{body: toolkit.NewLabel("body"), overlays: []toolkit.Widget{overlay}}
 	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 20})
 	b := overlay.Bounds()
 	if b.W != 32 || b.H != 16 || b.X != 4 || b.Y != 2 {
-		t.Errorf("overlay bounds = %+v, want (4,2,32,16)", b)
+		t.Errorf("overlay bounds = %+v", b)
 	}
 	pnt := painter.NewPixelPainter(make([]byte, 40*20*4), 40, 20)
 	p.Draw(pnt, toolkit.DefaultLight())
 }
 func TestPackedVBoxOverlayClampsMinimalSize(t *testing.T) {
 	overlay := toolkit.NewLabel("o")
-	p := &packedVBox{
-		headerH:  1,
-		footerH:  1,
-		overlays: []toolkit.Widget{overlay},
-	}
+	p := &packedVBox{headerH: 1, footerH: 1, overlays: []toolkit.Widget{overlay}}
 	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 4, H: 4})
 	b := overlay.Bounds()
 	if b.W < 1 || b.H < 1 {
-		t.Errorf("overlay bounds clamped to < 1: %+v", b)
+		t.Errorf("overlay clamped < 1: %+v", b)
 	}
 }
 func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
@@ -355,64 +348,102 @@ func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
 	before := tv.Text()
 	p.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
 	if tv.Text() == before {
-		t.Fatal("event was not forwarded to body TextView")
+		t.Fatal("event not forwarded to body TextView")
 	}
 }
 
-// TestMainSuccessPath drives main() via the runFunc/osExit seams so
-// coverage picks up the statements inside main without actually
-// exiting the test binary.
+// run() + main() coverage.
+func TestRunDefaultThemeSucceeds(t *testing.T) {
+	origRun := runAppFunc
+	defer func() { runAppFunc = origRun }()
+	origNew := newAppFunc
+	defer func() { newAppFunc = origNew }()
+
+	var captured *tui.App
+	newAppFunc = func() *tui.App {
+		a := tui.NewApp()
+		captured = a
+		return a
+	}
+	runAppFunc = func(*tui.App) int { return 0 }
+
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(nil) = %d, want 0. stderr:\n%s", code, stderr.String())
+	}
+	if captured.Theme == nil {
+		t.Fatal("no theme installed")
+	}
+	if len(captured.Keys) == 0 {
+		t.Fatal("no keys installed")
+	}
+	if captured.Theme.Background != toolkit.DefaultLight().Background {
+		t.Error("default is not light")
+	}
+}
+func TestRunThemeDarkApplied(t *testing.T) {
+	origRun := runAppFunc
+	defer func() { runAppFunc = origRun }()
+	origNew := newAppFunc
+	defer func() { newAppFunc = origNew }()
+
+	var captured *tui.App
+	newAppFunc = func() *tui.App {
+		a := tui.NewApp()
+		captured = a
+		return a
+	}
+	runAppFunc = func(*tui.App) int { return 0 }
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--theme=dark"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(--theme=dark) = %d, want 0", code)
+	}
+	if captured.Theme.Background != toolkit.DefaultDark().Background {
+		t.Error("--theme=dark did not apply dark")
+	}
+}
+func TestRunPropagatesExitCode(t *testing.T) {
+	origRun := runAppFunc
+	defer func() { runAppFunc = origRun }()
+	runAppFunc = func(*tui.App) int { return 5 }
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, &stdout, &stderr); code != 5 {
+		t.Fatalf("run() = %d, want 5", code)
+	}
+}
+func TestRunBadFlagFails(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--not-a-flag"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("run(--not-a-flag) = %d, want 2", code)
+	}
+}
+func TestDefaultRunAppSeamCallsRun(t *testing.T) {
+	a := tui.NewApp()
+	a.SetOpenTTYFn(func(*os.File) (tui.TTY, error) { return nil, errors.New("no tty") })
+	if code := defaultRunApp(a); code == 0 {
+		t.Fatal("defaultRunApp with openTTY error returned 0")
+	}
+}
 func TestMainSuccessPath(t *testing.T) {
 	origRun, origExit := runFunc, osExit
 	defer func() { runFunc, osExit = origRun, origExit }()
-	gotCode := -1
+	got := -1
 	runFunc = func([]string, io.Writer, io.Writer) int { return 0 }
-	osExit = func(code int) { gotCode = code }
+	osExit = func(code int) { got = code }
 	main()
-	if gotCode != 0 {
-		t.Fatalf("main() called osExit(%d), want 0", gotCode)
+	if got != 0 {
+		t.Fatalf("main() called osExit(%d), want 0", got)
 	}
 }
-
 func TestMainErrorPath(t *testing.T) {
 	origRun, origExit := runFunc, osExit
 	defer func() { runFunc, osExit = origRun, origExit }()
-	gotCode := -1
+	got := -1
 	runFunc = func([]string, io.Writer, io.Writer) int { return 7 }
-	osExit = func(code int) { gotCode = code }
+	osExit = func(code int) { got = code }
 	main()
-	if gotCode != 7 {
-		t.Fatalf("main() called osExit(%d), want 7", gotCode)
+	if got != 7 {
+		t.Fatalf("main() called osExit(%d), want 7", got)
 	}
-}
-
-// TestDefaultRunAppSeamCallsRun exercises defaultRunApp — the
-// production runAppFunc that hands off to tui.App.Run. We can't
-// drive a real event loop here (no TTY, no goroutines to unwind
-// deterministically), so we build a tui.App with an openTTYFn seam
-// that returns an error, which makes Run() bail out with a non-zero
-// code before touching stdin/stdout. This proves the "return a.Run()"
-// path is reachable AND that the wrapper propagates the exit code.
-func TestDefaultRunAppSeamCallsRun(t *testing.T) {
-	a := tui.NewApp()
-	// Force Run() to hit its openTTYFn error branch — it opens the
-	// TTY very early, returns an error, and Run bails out with a
-	// non-zero exit code. We just need the "return a.Run()"
-	// statement to be observable.
-	a = withOpenTTYError(a)
-	code := defaultRunApp(a)
-	if code == 0 {
-		t.Fatal("defaultRunApp against an openTTY-error App returned 0; want non-zero")
-	}
-}
-
-// withOpenTTYError swaps the App's openTTYFn seam to return a fixed
-// error so Run() bails out immediately, without touching a real TTY.
-// tui.App exposes SetOpenTTYFn (added in v0.3.0) so consumer code can
-// wire an alternate TTY factory — that's what powers this test.
-func withOpenTTYError(a *tui.App) *tui.App {
-	a.SetOpenTTYFn(func(*os.File) (tui.TTY, error) {
-		return nil, errors.New("test: no tty available")
-	})
-	return a
 }

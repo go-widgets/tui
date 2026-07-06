@@ -30,7 +30,6 @@ import (
 	"flag"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
@@ -87,21 +86,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 // state bundles every mutable widget the demo builds so key handlers
 // can address them by field name without threading a container tree.
 type state struct {
-	tree          *toolkit.TreeView
-	notebook      *toolkit.Notebook
-	contentTV     *toolkit.TextView
-	infoLabel     *toolkit.Label
+	fileList      *fileList
+	content       *toolkit.TextView
 	status        *toolkit.Label
 	menuBar       *toolkit.Label
 	helpPopover   *toolkit.Popover
 	searchPopover *toolkit.Popover
-	root          toolkit.Widget
+	root          *packedVBox
 	files         map[string]string
+	paths         []string // flat, order-stable list of file paths for fileList indexing
 }
 
-// newState builds the full widget tree — 3-level TreeView, two-tab
-// Notebook, MenuBar+Statusbar chrome, help/search popovers — and
-// returns it composed into a single root VBox.
+// newState builds the interactive demo's widget tree. Cell-mode
+// friendly composition:
+//
+//   - header (Label) — menu-style hint at row 0
+//   - body — an HBox-ish split of a fileList (left) + TextView (right)
+//     laid out by a hSplit local helper so cell-scale bounds are
+//     respected (toolkit.HPaned pixel-tunes its splitter offset).
+//   - footer (Label) — key hints at row H-1
+//
+// The pre-v0.3.4 tree/notebook/HPaned composition rendered poorly in
+// cell mode — TreeView row heights + Notebook body padding are
+// pixel-scaled. This composition uses only widgets that render at
+// exactly 1 cell per glyph.
 func newState() *state {
 	files := map[string]string{
 		"/src/main.go":    "package main\n\nfunc main() {}\n",
@@ -109,44 +117,17 @@ func newState() *state {
 		"/docs/README.md": "# Project\n\nDemo project.\n",
 		"/LICENSE":        "BSD-3-Clause\n",
 	}
+	paths := []string{"/src/main.go", "/src/util.go", "/docs/README.md", "/LICENSE"}
 
-	// 3-level tree: root → dir → file.
-	srcDir := &toolkit.TreeNode{Label: "src", Expanded: true, Children: []*toolkit.TreeNode{
-		{Label: "main.go", Data: "/src/main.go"},
-		{Label: "util.go", Data: "/src/util.go"},
-	}}
-	docsDir := &toolkit.TreeNode{Label: "docs", Expanded: true, Children: []*toolkit.TreeNode{
-		{Label: "README.md", Data: "/docs/README.md"},
-	}}
-	licenseNode := &toolkit.TreeNode{Label: "LICENSE", Data: "/LICENSE"}
-	root := &toolkit.TreeNode{
-		Label:    "/",
-		Expanded: true,
-		Children: []*toolkit.TreeNode{srcDir, docsDir, licenseNode},
-	}
-	tree := toolkit.NewTreeView(root)
+	fl := &fileList{items: paths, selected: 0}
+	content := toolkit.NewTextView(files[paths[0]])
+	content.Focused = false
 
-	// Notebook body: "content" tab holds a TextView; "info" tab
-	// holds a Label showing the selected node's name.
-	contentTV := toolkit.NewTextView("")
-	infoLabel := toolkit.NewLabel("(no selection)")
-	notebook := toolkit.NewNotebook()
-	notebook.AddTab("content", contentTV)
-	notebook.AddTab("info", infoLabel)
+	body := &hSplit{left: fl, right: content, leftFrac: 30}
 
-	// Split: left pane = tree, right pane = notebook.
-	hpaned := toolkit.NewHPaned(tree, notebook)
-
-	// Chrome. The toolkit's MenuBar / Statusbar carry pixel-tuned pad
-	// constants (MenuBarH = 22, StatusbarH = 18) that are visually
-	// grotesque in a terminal frame. Use flat Labels instead: a
-	// 1-cell header line and a 1-cell footer line. The tree /
-	// notebook keep working since HPaned is a horizontal split of two
-	// widgets already sized by the packedVBox body slot.
 	menuBar := toolkit.NewLabel("File   View   Help")
-	status := toolkit.NewLabel("q: quit  ?: help  /: search  Up/Down: navigate")
+	status := toolkit.NewLabel("q: quit  ?: help  /: search  Up/Down: navigate  Enter: open")
 
-	// Overlays: help + search popovers, both hidden until toggled.
 	helpPopover := toolkit.NewPopover(toolkit.NewLabel(
 		"q: quit  ?: help  /: search  Up/Down: navigate  Enter: open",
 	))
@@ -154,13 +135,9 @@ func newState() *state {
 	searchPopover := toolkit.NewPopover(toolkit.NewSearchEntry(""))
 	searchPopover.Title = "Search"
 
-	// Compose via packedVBox — header 1 row / body fills / footer 1 row.
-	// A plain toolkit.VBox would divide equally between the three
-	// children, which pushes MenuBar and Statusbar to a third of the
-	// screen each (bug that shipped in v0.3.0 / v0.3.1).
 	pv := &packedVBox{
 		header:   menuBar,
-		body:     hpaned,
+		body:     body,
 		footer:   status,
 		headerH:  1,
 		footerH:  1,
@@ -168,16 +145,105 @@ func newState() *state {
 	}
 
 	return &state{
-		tree:          tree,
-		notebook:      notebook,
-		contentTV:     contentTV,
-		infoLabel:     infoLabel,
+		fileList:      fl,
+		content:       content,
 		status:        status,
 		menuBar:       menuBar,
 		helpPopover:   helpPopover,
 		searchPopover: searchPopover,
 		root:          pv,
 		files:         files,
+		paths:         paths,
+	}
+}
+
+// syncContent refreshes the right pane with the file at the currently
+// selected fileList index.
+func (s *state) syncContent() {
+	if s.fileList.selected < 0 || s.fileList.selected >= len(s.paths) {
+		s.content.SetText("(no selection)")
+		return
+	}
+	s.content.SetText(s.files[s.paths[s.fileList.selected]])
+}
+
+// fileList is a cell-native list widget: one item per row, selection
+// highlight, arrow-key navigation. Replaces TreeView + Notebook +
+// HPaned which are all pixel-tuned and render poorly in cell mode.
+type fileList struct {
+	toolkit.Base
+	items    []string
+	selected int
+}
+
+func (f *fileList) Draw(p painter.Painter, theme *toolkit.Theme) {
+	r := f.Bounds()
+	for i, item := range f.items {
+		y := r.Y + i
+		if y >= r.Y+r.H {
+			break
+		}
+		ink := theme.OnSurface
+		if i == f.selected {
+			// Selected row: accent-fill background, background-color ink.
+			for x := r.X; x < r.X+r.W; x++ {
+				p.PutPixel(x, y, theme.Accent)
+			}
+			ink = theme.Background
+		}
+		toolkit.DrawText(p, r.X+1, y, item, ink)
+	}
+}
+
+func (f *fileList) OnEvent(ev toolkit.Event) {
+	if ev.Kind != toolkit.EventKeyDown {
+		return
+	}
+	switch ev.Code {
+	case "Up":
+		if f.selected > 0 {
+			f.selected--
+		}
+	case "Down":
+		if f.selected < len(f.items)-1 {
+			f.selected++
+		}
+	}
+}
+
+// hSplit is a cell-native horizontal split: left widget takes
+// leftFrac percent of the width, right widget takes the rest.
+type hSplit struct {
+	toolkit.Base
+	left, right toolkit.Widget
+	leftFrac    int
+}
+
+func (h *hSplit) SetBounds(r toolkit.Rect) {
+	h.Base.SetBounds(r)
+	lw := r.W * h.leftFrac / 100
+	if h.left != nil {
+		h.left.SetBounds(toolkit.Rect{X: r.X, Y: r.Y, W: lw, H: r.H})
+	}
+	if h.right != nil {
+		h.right.SetBounds(toolkit.Rect{X: r.X + lw, Y: r.Y, W: r.W - lw, H: r.H})
+	}
+}
+
+func (h *hSplit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	if h.left != nil {
+		h.left.Draw(pnt, theme)
+	}
+	if h.right != nil {
+		h.right.Draw(pnt, theme)
+	}
+}
+
+func (h *hSplit) OnEvent(ev toolkit.Event) {
+	// Forward to left pane (fileList) for arrow-key navigation.
+	// The right pane is read-only content, no events needed.
+	if h.left != nil {
+		h.left.OnEvent(ev)
 	}
 }
 
@@ -274,31 +340,23 @@ func (s *state) keys() map[string]func(*tui.App) {
 			s.searchPopover.Visible = !s.searchPopover.Visible
 			a.Refresh()
 		},
+		"Up": func(a *tui.App) {
+			if s.fileList.selected > 0 {
+				s.fileList.selected--
+				s.syncContent()
+				a.Consume()
+			}
+		},
+		"Down": func(a *tui.App) {
+			if s.fileList.selected < len(s.fileList.items)-1 {
+				s.fileList.selected++
+				s.syncContent()
+				a.Consume()
+			}
+		},
 		"Enter": func(a *tui.App) {
-			s.syncSelection()
+			s.syncContent()
 			a.Refresh()
 		},
 	}
-}
-
-// syncSelection copies the TreeView's Selected node into the
-// notebook's content + info tabs: info tab shows the node's Label,
-// content tab shows the file body looked up in files[Data]. A nil
-// selection or a directory node (no file path) leaves the tabs
-// unchanged.
-func (s *state) syncSelection() {
-	sel := s.tree.Selected
-	if sel == nil {
-		return
-	}
-	s.infoLabel.Text = sel.Label
-	path, ok := sel.Data.(string)
-	if !ok {
-		return
-	}
-	content, ok := s.files[path]
-	if !ok {
-		return
-	}
-	s.contentTV.Lines = strings.Split(content, "\n")
 }
