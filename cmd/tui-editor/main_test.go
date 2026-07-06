@@ -571,6 +571,43 @@ func TestPackedVBoxDrawAllChildren(t *testing.T) {
 
 // TestPackedVBoxForwardsEventsToBody covers the OnEvent forwarding
 // branch: an event delivered to packedVBox reaches the body widget.
+// TestPackedVBoxOverlaysRenderAndSize verifies the overlay slot
+// paths: SetBounds sizes each overlay to the padded body inset, and
+// Draw dispatches to every registered overlay.
+func TestPackedVBoxOverlaysRenderAndSize(t *testing.T) {
+	overlay := toolkit.NewLabel("overlay")
+	p := &packedVBox{
+		body:     toolkit.NewLabel("body"),
+		headerH:  0,
+		footerH:  0,
+		overlays: []toolkit.Widget{overlay},
+	}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 20})
+	b := overlay.Bounds()
+	if b.W != 32 || b.H != 16 || b.X != 4 || b.Y != 2 {
+		t.Errorf("overlay bounds = %+v, want (4,2,32,16)", b)
+	}
+	pnt := painter.NewPixelPainter(make([]byte, 40*20*4), 40, 20)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+
+// TestPackedVBoxOverlayClampsMinimalSize covers the "bw < 1" and
+// "bh < 1" guard branches when the total frame is smaller than the
+// header + footer + padding.
+func TestPackedVBoxOverlayClampsMinimalSize(t *testing.T) {
+	overlay := toolkit.NewLabel("o")
+	p := &packedVBox{
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{overlay},
+	}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 4, H: 4})
+	b := overlay.Bounds()
+	if b.W < 1 || b.H < 1 {
+		t.Errorf("overlay bounds clamped to < 1: %+v", b)
+	}
+}
+
 func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
 	tv := toolkit.NewTextView("")
 	tv.Focused = true

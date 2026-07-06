@@ -151,11 +151,12 @@ func newState() *state {
 	palette.Title = "Command palette"
 
 	root := &packedVBox{
-		header:  menuBar,
-		body:    tv,
-		footer:  statusbar,
-		headerH: 1,
-		footerH: 1,
+		header:   menuBar,
+		body:     tv,
+		footer:   statusbar,
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{palette},
 	}
 
 	return &state{
@@ -172,16 +173,18 @@ func newState() *state {
 }
 
 // packedVBox — same shape as cmd/tui-explorer's local helper:
-// header (fixed) / body (expand) / footer (fixed). Suitable for
-// terminal-scale layouts where toolkit.VBox's equal-height split
-// would inflate the chrome to a third of the screen each.
+// header (fixed) / body (expand) / footer (fixed) + overlay slots
+// for popovers. Overlays draw on top of everything else every
+// frame; the widget's own Visible field gates whether Draw
+// actually paints.
 type packedVBox struct {
 	toolkit.Base
-	header  toolkit.Widget
-	body    toolkit.Widget
-	footer  toolkit.Widget
-	headerH int
-	footerH int
+	header   toolkit.Widget
+	body     toolkit.Widget
+	footer   toolkit.Widget
+	headerH  int
+	footerH  int
+	overlays []toolkit.Widget
 }
 
 func (p *packedVBox) SetBounds(r toolkit.Rect) {
@@ -200,6 +203,19 @@ func (p *packedVBox) SetBounds(r toolkit.Rect) {
 			H: r.H - p.headerH - p.footerH,
 		})
 	}
+	for _, o := range p.overlays {
+		bx := r.X + 4
+		by := r.Y + p.headerH + 2
+		bw := r.W - 8
+		bh := r.H - p.headerH - p.footerH - 4
+		if bw < 1 {
+			bw = 1
+		}
+		if bh < 1 {
+			bh = 1
+		}
+		o.SetBounds(toolkit.Rect{X: bx, Y: by, W: bw, H: bh})
+	}
 }
 
 func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
@@ -211,6 +227,9 @@ func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 	if p.footer != nil {
 		p.footer.Draw(pnt, theme)
+	}
+	for _, o := range p.overlays {
+		o.Draw(pnt, theme)
 	}
 }
 

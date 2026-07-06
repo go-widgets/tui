@@ -80,6 +80,62 @@ func TestEditorRendersHeaderAndFooterInPty(t *testing.T) {
 	}
 }
 
+// TestEditorRealInsertionFlowInPty exercises the full interactive
+// path: press 'i' to enter edit mode, type "hello", verify "hello"
+// lands in the rendered frame, press Escape to leave edit mode,
+// press 'q' to quit. If any step failed silently (raw-mode wrong,
+// key not routed, TextView not repainted), this test fails loud.
+//
+// This is the missing verification the v0.3.0 / v0.3.1 pipeline
+// never had — a real interactive cycle in a real pty. Even the
+// v0.3.2 layout-only e2e test could pass without editing actually
+// working, since it only asserts on the initial frame.
+func TestEditorRealInsertionFlowInPty(t *testing.T) {
+	bin := buildBinary(t)
+
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	captureDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, ptmx)
+		close(captureDone)
+	}()
+
+	// Scripted interaction — small delays so the App loop repaints
+	// between each keystroke and the pty captures every frame.
+	write := func(s string) {
+		time.Sleep(120 * time.Millisecond)
+		_, _ = ptmx.Write([]byte(s))
+	}
+	write("i")           // enter edit mode
+	write("hello")       // type five chars
+	write("\x1b")        // Escape → back to view mode
+	write("q")           // quit
+
+	select {
+	case <-captureDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("binary did not exit within 5s of receiving 'q'")
+	}
+	_ = c.Wait()
+
+	stripped := stripANSI(buf.Bytes())
+	if !strings.Contains(stripped, "hello") {
+		t.Fatalf("captured frames never showed 'hello' after editing.\n---captured---\n%s", stripped)
+	}
+	// EDIT mode label should have appeared in the footer at some
+	// point during the run (after 'i', before Escape).
+	if !strings.Contains(stripped, "EDIT") {
+		t.Fatalf("captured frames never showed 'EDIT' mode indicator.\n---captured---\n%s", stripped)
+	}
+}
+
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

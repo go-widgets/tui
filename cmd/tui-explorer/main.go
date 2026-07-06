@@ -159,11 +159,12 @@ func newState() *state {
 	// children, which pushes MenuBar and Statusbar to a third of the
 	// screen each (bug that shipped in v0.3.0 / v0.3.1).
 	pv := &packedVBox{
-		header:  menuBar,
-		body:    hpaned,
-		footer:  status,
-		headerH: 1,
-		footerH: 1,
+		header:   menuBar,
+		body:     hpaned,
+		footer:   status,
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{helpPopover, searchPopover},
 	}
 
 	return &state{
@@ -181,19 +182,28 @@ func newState() *state {
 }
 
 // packedVBox lays out three children with fixed-height header +
-// footer and a body that fills the remaining vertical space. Suitable
+// footer and a body that fills the remaining vertical space, plus
+// optional overlays that draw on top of everything else. Suitable
 // for terminal-scale layouts where toolkit.VBox's equal-height
-// distribution would make every element unusably big. SetBounds
-// re-runs the layout at every resize; Draw paints in draw-order
-// (body first, then header + footer on top so overlays sit above);
-// OnEvent forwards to body (the main interactive area).
+// distribution would make every element unusably big.
+//
+// SetBounds re-runs the layout at every resize; Draw paints in
+// draw-order (body → header → footer → overlays), so overlays land
+// on top and are visible even when their bounds intersect other
+// children; OnEvent forwards to body (the main interactive area).
+//
+// Overlays are widget references appended to `overlays` at wire
+// time. A widget's own `Visible` field (Popover, Toast, …) gates
+// whether Draw actually paints — the packedVBox unconditionally
+// dispatches Draw to every registered overlay every frame.
 type packedVBox struct {
 	toolkit.Base
-	header  toolkit.Widget
-	body    toolkit.Widget
-	footer  toolkit.Widget
-	headerH int
-	footerH int
+	header   toolkit.Widget
+	body     toolkit.Widget
+	footer   toolkit.Widget
+	headerH  int
+	footerH  int
+	overlays []toolkit.Widget
 }
 
 func (p *packedVBox) SetBounds(r toolkit.Rect) {
@@ -212,6 +222,20 @@ func (p *packedVBox) SetBounds(r toolkit.Rect) {
 			H: r.H - p.headerH - p.footerH,
 		})
 	}
+	// Overlays: centred in the body area with 4-cell padding.
+	for _, o := range p.overlays {
+		bx := r.X + 4
+		by := r.Y + p.headerH + 2
+		bw := r.W - 8
+		bh := r.H - p.headerH - p.footerH - 4
+		if bw < 1 {
+			bw = 1
+		}
+		if bh < 1 {
+			bh = 1
+		}
+		o.SetBounds(toolkit.Rect{X: bx, Y: by, W: bw, H: bh})
+	}
 }
 
 func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
@@ -223,6 +247,9 @@ func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 	if p.footer != nil {
 		p.footer.Draw(pnt, theme)
+	}
+	for _, o := range p.overlays {
+		o.Draw(pnt, theme)
 	}
 }
 
