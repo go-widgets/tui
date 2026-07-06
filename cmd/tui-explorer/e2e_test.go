@@ -326,6 +326,160 @@ func TestExplorerBodyChromeContrastIsPerceptible(t *testing.T) {
 	}
 }
 
+// -----------------------------------------------------------------
+// v0.3.11 mouse-click integration
+// -----------------------------------------------------------------
+
+// sgrMousePress returns the byte sequence a real xterm would emit
+// for a left-button press at (col, row) in the SGR encoding — the
+// same encoding tui's InputParser advertises via ?1006. col/row are
+// 1-indexed on the wire; callers pass 1-indexed coords directly.
+func sgrMousePress(col, row int) []byte {
+	// \x1b[<0;C;RM  — button 0, press.
+	return []byte("\x1b[<0;" + itoa(col) + ";" + itoa(row) + "M")
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [12]byte
+	i := len(buf)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+// captureFrameWithBytes is captureFrame but accepts raw bytes for
+// mouse escape sequences instead of a per-byte key string.
+func captureFrameWithBytes(t *testing.T, cols, rows int, keyBytes [][]byte, timeout time.Duration, args ...string) *tui.TermGrid {
+	t.Helper()
+	bin := buildBinary(t)
+	c := exec.Command(bin, args...)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	captureDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, ptmx)
+		close(captureDone)
+	}()
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		for _, k := range keyBytes {
+			_, _ = ptmx.Write(k)
+			time.Sleep(120 * time.Millisecond)
+		}
+	}()
+
+	select {
+	case <-captureDone:
+	case <-time.After(timeout):
+		t.Fatal("binary did not exit within timeout")
+	}
+	_ = c.Wait()
+	return tui.DecodeANSI(buf.Bytes(), cols, rows)
+}
+
+// TestExplorerClickOnFileRowSelectsIt — a synthesized SGR mouse press
+// on row 3 of the file list selects that entry. Verified by asserting
+// the accent-background highlight moved from row 1 (default) to row 3
+// AND the right pane now shows README.md content.
+func TestExplorerClickOnFileRowSelectsIt(t *testing.T) {
+	// Row 3 on the wire = terminal row 3 = index 2 in fileList (0-based),
+	// which is /docs/README.md per the demo's paths.
+	// Col 5 lands well inside the left pane's width.
+	keys := [][]byte{
+		sgrMousePress(5, 3), // click file row 2 (README.md)
+		[]byte("q"),         // quit
+	}
+	g := captureFrameWithBytes(t, 80, 30, keys, 5*time.Second)
+
+	// The selected row is now the row corresponding to the click.
+	// Terminal is 1-indexed on the wire, 0-indexed in our decoder;
+	// (5, 3) on wire → (4, 2) decoded. Body starts at row 1, so
+	// widget-local Y = 2 - 1 = 1 → item index 1 (util.go). Actually
+	// packedVBox.body starts at Y=headerH=1; hSplit occupies that
+	// body; fileList is inside hSplit at the same Y. So a click on
+	// terminal row 3 → decoded Y=2 → body-local Y=1 → fileList
+	// item 1 = /src/util.go.
+	if !strings.Contains(g.RowText(2), "/src/util.go") {
+		t.Errorf("row 2 = %q, want '/src/util.go'", g.RowText(2))
+	}
+	c := g.At(3, 2)
+	if !c.Bg.Set || c.Bg.R != lightAccentR {
+		t.Errorf("row 2 highlight not applied after click. cell=%+v", c)
+	}
+	// Right pane must have updated to util.go's content.
+	found := false
+	for y := 0; y < g.Rows; y++ {
+		if strings.Contains(g.RowText(y), "package util") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("right pane never showed 'package util' after click — syncContent didn't fire")
+	}
+}
+
+// TestExplorerMouseTrackingEnabledOnEnter — Enter() must emit the
+// mouse-enable CSI (\x1b[?1002h\x1b[?1006h) at startup, else no
+// terminal would send mouse reports at all. Assert on the raw
+// stream (not the grid).
+func TestExplorerMouseTrackingEnabledOnEnter(t *testing.T) {
+	bin := buildBinary(t)
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, ptmx); close(done) }()
+	go func() { time.Sleep(300 * time.Millisecond); _, _ = ptmx.Write([]byte("q")) }()
+	<-done
+	_ = c.Wait()
+
+	raw := buf.String()
+	if !strings.Contains(raw, "\x1b[?1002h") {
+		t.Errorf("startup stream missing ?1002h mouse-enable: %q", raw[:min(200, len(raw))])
+	}
+	if !strings.Contains(raw, "\x1b[?1006h") {
+		t.Errorf("startup stream missing ?1006h SGR mouse-encoding")
+	}
+	if !strings.Contains(raw, "\x1b[?1002l") {
+		t.Errorf("shutdown stream missing ?1002l mouse-disable")
+	}
+	if !strings.Contains(raw, "\x1b[?1006l") {
+		t.Errorf("shutdown stream missing ?1006l SGR mouse-disable")
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // captureFrameWithArgs is captureFrame + extra args to the binary.
 func captureFrameWithArgs(t *testing.T, cols, rows int, keys string, timeout time.Duration, args ...string) *tui.TermGrid {
 	t.Helper()

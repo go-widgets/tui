@@ -199,7 +199,7 @@ func newState() *state {
 		overlays: []toolkit.Widget{helpPopover, searchPopover},
 	}
 
-	return &state{
+	s := &state{
 		fileList:      fl,
 		content:       content,
 		status:        status,
@@ -210,6 +210,12 @@ func newState() *state {
 		files:         files,
 		paths:         paths,
 	}
+	// Wire the fileList → syncContent bridge so a click (or an
+	// arrow key routed through the widget instead of the App key
+	// map) refreshes the right pane. The App-level Up/Down handlers
+	// stay in place for backwards compatibility.
+	fl.onSelect = func(int) { s.syncContent() }
+	return s
 }
 
 // syncContent refreshes the right pane with the file at the currently
@@ -302,6 +308,11 @@ type fileList struct {
 	toolkit.Base
 	items    []string
 	selected int
+	// onSelect fires after selected changes via either a keyboard
+	// event or a click. Optional — a nil callback is a no-op. The
+	// callback receives the new index; wire it to whatever refresh
+	// the caller needs (e.g. syncContent + App.Refresh).
+	onSelect func(int)
 }
 
 func (f *fileList) Draw(p painter.Painter, theme *toolkit.Theme) {
@@ -333,17 +344,33 @@ func (f *fileList) Draw(p painter.Painter, theme *toolkit.Theme) {
 }
 
 func (f *fileList) OnEvent(ev toolkit.Event) {
-	if ev.Kind != toolkit.EventKeyDown {
-		return
-	}
-	switch ev.Code {
-	case "Up":
-		if f.selected > 0 {
-			f.selected--
+	switch ev.Kind {
+	case toolkit.EventKeyDown:
+		switch ev.Code {
+		case "Up":
+			if f.selected > 0 {
+				f.selected--
+				if f.onSelect != nil {
+					f.onSelect(f.selected)
+				}
+			}
+		case "Down":
+			if f.selected < len(f.items)-1 {
+				f.selected++
+				if f.onSelect != nil {
+					f.onSelect(f.selected)
+				}
+			}
 		}
-	case "Down":
-		if f.selected < len(f.items)-1 {
-			f.selected++
+	case toolkit.EventClick:
+		// Coordinates are widget-local per the toolkit contract; the
+		// container translates surface coords → local before dispatch.
+		if ev.Y < 0 || ev.Y >= len(f.items) {
+			return
+		}
+		f.selected = ev.Y
+		if f.onSelect != nil {
+			f.onSelect(f.selected)
 		}
 	}
 }
@@ -377,8 +404,25 @@ func (h *hSplit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 }
 
 func (h *hSplit) OnEvent(ev toolkit.Event) {
-	// Forward to left pane (fileList) for arrow-key navigation.
-	// The right pane is read-only content, no events needed.
+	if ev.Kind == toolkit.EventClick {
+		// ev.X/Y are widget-local to hSplit (parent translated).
+		// Left pane occupies local X ∈ [0, lw); right pane occupies
+		// local X ∈ [lw, W). Y unchanged (full-height children).
+		lw := h.Bounds().W * h.leftFrac / 100
+		if ev.X < lw {
+			if h.left != nil {
+				h.left.OnEvent(ev)
+			}
+			return
+		}
+		if h.right != nil {
+			child := ev
+			child.X -= lw
+			h.right.OnEvent(child)
+		}
+		return
+	}
+	// Non-click events (arrow keys) still go to the left pane.
 	if h.left != nil {
 		h.left.OnEvent(ev)
 	}
@@ -457,6 +501,51 @@ func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 }
 
 func (p *packedVBox) OnEvent(ev toolkit.Event) {
+	if ev.Kind == toolkit.EventClick {
+		// ev.X/Y are widget-local to packedVBox. Vertical layout:
+		//   header at Y ∈ [0, headerH)
+		//   body   at Y ∈ [headerH, H - footerH)
+		//   footer at Y ∈ [H - footerH, H)
+		r := p.Bounds()
+		// Overlays sit on top of the body area with the same 4-cell
+		// inset used by SetBounds. Check them first (top-most wins).
+		for _, o := range p.overlays {
+			ox, oy := 4, p.headerH+2
+			ow, oh := r.W-8, r.H-p.headerH-p.footerH-4
+			if ow < 1 {
+				ow = 1
+			}
+			if oh < 1 {
+				oh = 1
+			}
+			if ev.X >= ox && ev.X < ox+ow && ev.Y >= oy && ev.Y < oy+oh {
+				child := ev
+				child.X -= ox
+				child.Y -= oy
+				o.OnEvent(child)
+				return
+			}
+		}
+		switch {
+		case ev.Y < p.headerH:
+			if p.header != nil {
+				p.header.OnEvent(ev)
+			}
+		case ev.Y >= r.H-p.footerH:
+			if p.footer != nil {
+				child := ev
+				child.Y -= r.H - p.footerH
+				p.footer.OnEvent(child)
+			}
+		default:
+			if p.body != nil {
+				child := ev
+				child.Y -= p.headerH
+				p.body.OnEvent(child)
+			}
+		}
+		return
+	}
 	if p.body != nil {
 		p.body.OnEvent(ev)
 	}

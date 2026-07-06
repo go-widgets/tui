@@ -41,6 +41,14 @@ const (
 	seqLeaveAltScreen = "\x1b[?1049l"
 	seqHideCursor     = "\x1b[?25l"
 	seqShowCursor     = "\x1b[?25h"
+	// seqEnableMouse turns on button-event tracking (?1002 —
+	// press+release+drag, no bare motion) and switches the report
+	// encoding to SGR (?1006 — decimal semicolon-separated so
+	// coordinates > 223 are representable). Together these are the
+	// modern portable combo honoured by xterm, iTerm2, Terminal.app,
+	// tmux, kitty, alacritty, and Windows Terminal.
+	seqEnableMouse  = "\x1b[?1002h\x1b[?1006h"
+	seqDisableMouse = "\x1b[?1002l\x1b[?1006l"
 )
 
 // Package-level indirection so tests can fake the underlying TTY
@@ -89,7 +97,7 @@ func (t *unixTTY) Enter() error {
 	if err != nil {
 		return err
 	}
-	if _, err := t.file.WriteString(seqEnterAltScreen + seqHideCursor); err != nil {
+	if _, err := t.file.WriteString(seqEnterAltScreen + seqHideCursor + seqEnableMouse); err != nil {
 		// Best-effort roll-back of the raw-mode change we just made
 		// so we do not leave the terminal in an unusable state when
 		// the write to the output file fails.
@@ -110,7 +118,7 @@ func (t *unixTTY) Leave() error {
 	if !t.entered {
 		return nil
 	}
-	_, writeErr := t.file.WriteString(seqLeaveAltScreen + seqShowCursor)
+	_, writeErr := t.file.WriteString(seqDisableMouse + seqLeaveAltScreen + seqShowCursor)
 	restoreErr := restoreFn(t.fd, t.oldState)
 	t.entered = false
 	t.oldState = nil

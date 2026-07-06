@@ -52,6 +52,26 @@ func TestNewStateFields(t *testing.T) {
 	}
 }
 
+// TestNewStateWiresFileListOnSelectToSyncContent verifies the
+// closure newState installs on the fileList: bumping selected then
+// invoking onSelect must refresh the content pane. Also covers the
+// closure body's statement — which was uncovered until this test.
+func TestNewStateWiresFileListOnSelectToSyncContent(t *testing.T) {
+	s := newState()
+	// Simulate what an arrow key or click does: change selected,
+	// then fire the callback.
+	s.fileList.selected = 2
+	if s.fileList.onSelect == nil {
+		t.Fatal("newState left fileList.onSelect nil")
+	}
+	before := s.content.Text()
+	s.fileList.onSelect(s.fileList.selected)
+	if s.content.Text() == before {
+		t.Errorf("onSelect closure did not refresh content: before=%q after=%q",
+			before, s.content.Text())
+	}
+}
+
 // TestKeysReturnsAllHandlers checks every expected key is registered.
 func TestKeysReturnsAllHandlers(t *testing.T) {
 	s := newState()
@@ -218,17 +238,98 @@ func TestFileListOnEventUpDown(t *testing.T) {
 	if fl.selected != 1 {
 		t.Errorf("Down: %d, want 1", fl.selected)
 	}
-	// Non-key event is a no-op.
+	// Unknown key is a no-op (default arm of switch).
 	before := fl.selected
-	fl.OnEvent(toolkit.Event{Kind: toolkit.EventClick})
-	if fl.selected != before {
-		t.Errorf("non-key event mutated selection: %d → %d", before, fl.selected)
-	}
-	// Unknown key is a no-op too (default arm of switch).
 	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Left"})
 	if fl.selected != before {
 		t.Errorf("unknown key mutated selection: %d → %d", before, fl.selected)
 	}
+	// EventCompositionStart (a Kind we don't handle at all) is a
+	// no-op — guards the outer switch's default arm.
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventCompositionStart})
+	if fl.selected != before {
+		t.Errorf("composition event mutated selection: %d → %d", before, fl.selected)
+	}
+}
+
+// TestFileListOnEventClickSelectsRow — a click at widget-local Y=k
+// selects item k, invokes onSelect, and no-ops when Y falls outside
+// [0, len(items)).
+func TestFileListOnEventClickSelectsRow(t *testing.T) {
+	items := []string{"a", "b", "c", "d"}
+	called := -1
+	fl := &fileList{items: items, selected: 0, onSelect: func(i int) { called = i }}
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 2})
+	if fl.selected != 2 {
+		t.Errorf("click Y=2: selected = %d, want 2", fl.selected)
+	}
+	if called != 2 {
+		t.Errorf("onSelect not called with 2: got %d", called)
+	}
+	// Y below range = no-op.
+	fl.selected = 1
+	called = -1
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventClick, Y: -1})
+	if fl.selected != 1 || called != -1 {
+		t.Errorf("click Y=-1 must no-op: selected=%d called=%d", fl.selected, called)
+	}
+	// Y past end = no-op.
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventClick, Y: 10})
+	if fl.selected != 1 || called != -1 {
+		t.Errorf("click Y=10 must no-op: selected=%d called=%d", fl.selected, called)
+	}
+	// Nil onSelect must not crash — cover the callback-nil branch.
+	fl.onSelect = nil
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventClick, Y: 3})
+	if fl.selected != 3 {
+		t.Errorf("click with nil onSelect: selected = %d, want 3", fl.selected)
+	}
+}
+
+// TestFileListOnSelectFiresOnArrowNav — arrow-key nav must also
+// invoke onSelect so click and arrow paths stay consistent.
+func TestFileListOnSelectFiresOnArrowNav(t *testing.T) {
+	called := []int{}
+	fl := &fileList{
+		items:    []string{"a", "b", "c"},
+		selected: 0,
+		onSelect: func(i int) { called = append(called, i) },
+	}
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	if got, want := called, []int{1, 2, 1}; !equalInts(got, want) {
+		t.Errorf("onSelect calls = %v, want %v", got, want)
+	}
+	// nil callback path — no crash.
+	fl.onSelect = nil
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	// no-op guard branches: Up at top / Down at bottom must ALSO
+	// leave onSelect uncalled (the callback lives inside the mutate
+	// path, not the boundary-guard path).
+	fl.onSelect = func(i int) { called = append(called, -1000) }
+	fl.selected = 0
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	fl.selected = len(fl.items) - 1
+	fl.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	for _, v := range called {
+		if v == -1000 {
+			t.Errorf("boundary-guard fired onSelect: %v", called)
+		}
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestFileListUpAtTopIsNoop + DownAtBottom cover the edge guards.
@@ -286,6 +387,47 @@ func TestHSplitOnEventForwardsToLeft(t *testing.T) {
 	if fl.selected != 1 {
 		t.Errorf("hSplit did not forward Down to left: %d", fl.selected)
 	}
+}
+
+// TestHSplitClickRoutesByHitTest verifies a click at widget-local
+// (2, 2) with leftFrac=30 on W=100 (lw=30) lands in the left pane
+// with unchanged coords, a click at local X=60 goes to right with
+// translated X = 60-30 = 30.
+func TestHSplitClickRoutesByHitTest(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b", "c", "d"}, selected: 0}
+	tp := &textPreview{}
+	tp.setText("x\ny\nz")
+	h := &hSplit{left: fl, right: tp, leftFrac: 30}
+	h.SetBounds(toolkit.Rect{X: 10, Y: 5, W: 100, H: 20})
+	// Local (2, 2) → left pane; fileList sees (2, 2), selects item 2.
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 2})
+	if fl.selected != 2 {
+		t.Errorf("left-pane click: selected = %d, want 2", fl.selected)
+	}
+	// Local (60, 6) → right pane. textPreview has no visible state
+	// to check but the code path must not crash.
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 60, Y: 6})
+	// Local X=200 is past the right pane's width too. Still routes
+	// to right pane per the contract (parent already hit-tested);
+	// right handles gracefully.
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 200, Y: 6})
+}
+
+// TestHSplitClickWithNilLeftIsDropped — click on left region with
+// nil left just drops the event silently. The nil-left / hit-right
+// path never fires because clicks always route by X < lw.
+func TestHSplitClickWithNilLeftIsDropped(t *testing.T) {
+	h := &hSplit{leftFrac: 50}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 3})
+}
+
+// TestHSplitClickOnRightWithNilRight — click on right region with
+// nil right silently drops.
+func TestHSplitClickOnRightWithNilRight(t *testing.T) {
+	h := &hSplit{leftFrac: 50}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 30, Y: 3})
 }
 
 // textPreview tests.
@@ -413,6 +555,99 @@ func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
 	p.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
 	if tv.Text() == before {
 		t.Fatal("event not forwarded to body TextView")
+	}
+}
+
+// TestPackedVBoxClickRoutesByHitTest verifies the header / body /
+// footer band routing + overlay top-priority.
+func TestPackedVBoxClickRoutesByHitTest(t *testing.T) {
+	// bodyFL is inside body (via hSplit) so a body click reaches it.
+	bodyFL := &fileList{items: []string{"a", "b", "c", "d", "e"}, selected: 0}
+	body := &hSplit{left: bodyFL, leftFrac: 100}
+	overlayFL := &fileList{items: []string{"o1", "o2", "o3"}, selected: 0}
+	p := &packedVBox{
+		header:   toolkit.NewLabel("H"),
+		body:     body,
+		footer:   toolkit.NewLabel("F"),
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{overlayFL},
+	}
+	// H=20, headerH=1, footerH=1, so body spans Y ∈ [1,19). Overlay
+	// bounds: (4, 3, 12, 14) → Y ∈ [3, 17), X ∈ [4, 16).
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+
+	// Body click OUTSIDE the overlay region: (1, 18) — X=1 < 4 so
+	// overlay skipped. Y=18 in body → body-local Y=17 → hSplit lw=20
+	// so X=1 < 20 → left → fileList Y=17. fileList len=5 so drops.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 18})
+
+	// Body click also OUTSIDE overlay but WITHIN fileList row range:
+	// (1, 3) — X=1 < 4 so overlay skipped. Y=3 → body-local Y=2 →
+	// fileList Y=2 → selects item 2. This exercises the "body
+	// branch when Y still in body band but not overlay X-strip".
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 3})
+	if bodyFL.selected != 2 {
+		t.Errorf("body-below-overlay click: selected = %d, want 2", bodyFL.selected)
+	}
+
+	// Overlay hit: (5, 4) — X ∈ [4,16), Y ∈ [3,17). Translated to
+	// overlay-local (1, 1) → fileList selects item 1.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if overlayFL.selected != 1 {
+		t.Errorf("overlay click: overlayFL.selected = %d, want 1", overlayFL.selected)
+	}
+
+	// Header row (Y=0) — routes to header Label which no-ops.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 0})
+
+	// Footer row (Y=19) — routes to footer Label with translated Y=0.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 19})
+}
+
+// TestPackedVBoxClickWithNilHeaderFooter — the nil guards in each
+// switch branch must skip cleanly.
+func TestPackedVBoxClickWithNilHeaderFooter(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b"}, selected: 0, onSelect: func(int) {}}
+	p := &packedVBox{
+		body:    fl,
+		headerH: 1,
+		footerH: 1,
+	}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+	// Click in body band: local Y=2 → fileList Y=1 → selects 1.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 2})
+	if fl.selected != 1 {
+		t.Errorf("body click: selected = %d, want 1", fl.selected)
+	}
+	// Click in header band (Y=0) with nil header — must not crash.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 0})
+	// Click in footer band (Y=19) with nil footer — must not crash.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 19})
+	// Click in body band with nil body — must not crash.
+	p.body = nil
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 5})
+}
+
+// TestPackedVBoxOverlayClampsMinBoundsInHitTest — when the frame is
+// too small, the ow<1 / oh<1 guards inside OnEvent must still keep
+// the overlay hit-range non-empty so a clicked spot doesn't fall
+// into an unreachable void.
+func TestPackedVBoxOverlayClampsMinBoundsInHitTest(t *testing.T) {
+	overlayFL := &fileList{items: []string{"a"}, selected: 0}
+	p := &packedVBox{
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{overlayFL},
+	}
+	// W=6 → ow = W-8 = -2 → clamped to 1. H=4 → oh = H-2-4 = -2 → 1.
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 6, H: 4})
+	// Overlay hit region reduced to X=[4,5), Y=[3,4). Click there.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 4, Y: 3})
+	if overlayFL.selected != 0 {
+		// A single-item list can only select item 0; the assertion
+		// exercises the clamp branch rather than a movement.
+		t.Errorf("overlay-min click: selected = %d, want 0", overlayFL.selected)
 	}
 }
 

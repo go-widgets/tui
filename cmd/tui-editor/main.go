@@ -316,6 +316,26 @@ func (t *cellTextEdit) OnEvent(ev toolkit.Event) {
 				t.CursorCol++
 			}
 		}
+	case toolkit.EventClick:
+		// A click positions the cursor at the clicked cell. Y beyond
+		// the last line clamps to the last line; X beyond the line
+		// length clamps to end-of-line. Y < 0 or X < 0 clamp to 0.
+		y := ev.Y
+		if y < 0 {
+			y = 0
+		}
+		if y >= len(t.Lines) {
+			y = len(t.Lines) - 1
+		}
+		t.CursorLine = y
+		x := ev.X
+		if x < 0 {
+			x = 0
+		}
+		if x > len(t.Lines[t.CursorLine]) {
+			x = len(t.Lines[t.CursorLine])
+		}
+		t.CursorCol = x
 	}
 }
 
@@ -418,6 +438,46 @@ func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 }
 
 func (p *packedVBox) OnEvent(ev toolkit.Event) {
+	if ev.Kind == toolkit.EventClick {
+		// ev.X/Y are widget-local to packedVBox; route by Y band.
+		r := p.Bounds()
+		for _, o := range p.overlays {
+			ox, oy := 4, p.headerH+2
+			ow, oh := r.W-8, r.H-p.headerH-p.footerH-4
+			if ow < 1 {
+				ow = 1
+			}
+			if oh < 1 {
+				oh = 1
+			}
+			if ev.X >= ox && ev.X < ox+ow && ev.Y >= oy && ev.Y < oy+oh {
+				child := ev
+				child.X -= ox
+				child.Y -= oy
+				o.OnEvent(child)
+				return
+			}
+		}
+		switch {
+		case ev.Y < p.headerH:
+			if p.header != nil {
+				p.header.OnEvent(ev)
+			}
+		case ev.Y >= r.H-p.footerH:
+			if p.footer != nil {
+				child := ev
+				child.Y -= r.H - p.footerH
+				p.footer.OnEvent(child)
+			}
+		default:
+			if p.body != nil {
+				child := ev
+				child.Y -= p.headerH
+				p.body.OnEvent(child)
+			}
+		}
+		return
+	}
 	if p.body != nil {
 		p.body.OnEvent(ev)
 	}

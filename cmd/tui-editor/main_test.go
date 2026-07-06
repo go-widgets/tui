@@ -619,6 +619,77 @@ func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
 	}
 }
 
+// TestPackedVBoxClickRoutesByHitTest — click routing exercises the
+// header / body / footer band + overlay top-priority.
+func TestPackedVBoxClickRoutesByHitTest(t *testing.T) {
+	body := &cellTextEdit{Lines: []string{"line0", "line1", "line2"}}
+	overlay := &cellTextEdit{Lines: []string{"o"}, Focused: true}
+	p := &packedVBox{
+		header:   toolkit.NewLabel("H"),
+		body:     body,
+		footer:   toolkit.NewLabel("F"),
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{overlay},
+	}
+	// H=20, headerH=1, footerH=1 → body Y ∈ [1,19). Overlay bounds:
+	// bx=4, by=3, ow=12, oh=14 → Y ∈ [3,17), X ∈ [4,16).
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+
+	// Click INSIDE overlay: local (5, 4) → overlay-local (1, 1).
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if overlay.CursorLine != 0 || overlay.CursorCol != 1 {
+		t.Errorf("overlay click: cursor=(%d,%d), want (1,0)", overlay.CursorCol, overlay.CursorLine)
+	}
+	// Body OUTSIDE overlay X-strip: (1, 3) — X=1 < 4 so overlay
+	// skipped. Y=3 in body band → body-local Y=2 → cellTextEdit at
+	// line 2, col 1.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 3})
+	if body.CursorLine != 2 || body.CursorCol != 1 {
+		t.Errorf("body click below overlay: cursor=(%d,%d), want (1,2)", body.CursorCol, body.CursorLine)
+	}
+	// Header row (Y=0) — Label OnEvent no-ops.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 0})
+	// Footer row (Y=19) — Label OnEvent no-ops.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 19})
+}
+
+// TestPackedVBoxClickWithNilHeaderAndFooter covers nil-branch guards.
+func TestPackedVBoxClickWithNilHeaderAndFooter(t *testing.T) {
+	body := &cellTextEdit{Lines: []string{"aaa"}}
+	p := &packedVBox{body: body, headerH: 1, footerH: 1}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 10})
+	// Body region click. Y=2 → body-local Y=1 → cellTextEdit clamps
+	// to line 0 (only 1 line in Lines), col 2.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 2})
+	if body.CursorLine != 0 || body.CursorCol != 2 {
+		t.Errorf("body click: cursor=(%d,%d), want (2,0)", body.CursorCol, body.CursorLine)
+	}
+	// Header-band click with nil header — no crash.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 0})
+	// Footer-band click with nil footer — no crash.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 9})
+	// Body-band click with nil body — no crash.
+	p.body = nil
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 5})
+}
+
+// TestPackedVBoxOverlayClampsMinBoundsInHitTest — ow<1/oh<1 guards.
+func TestPackedVBoxOverlayClampsMinBoundsInHitTest(t *testing.T) {
+	overlay := &cellTextEdit{Lines: []string{"a"}, Focused: true}
+	p := &packedVBox{
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{overlay},
+	}
+	// W=6 → ow = -2 → clamped to 1. H=4 → oh = -2 → 1.
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 6, H: 4})
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 4, Y: 3})
+	if overlay.CursorLine != 0 || overlay.CursorCol != 0 {
+		t.Errorf("min-overlay click: cursor=(%d,%d), want (0,0)", overlay.CursorCol, overlay.CursorLine)
+	}
+}
+
 // TestMainSuccessPath + TestMainErrorPath drive main via the
 // runFunc/osExit seams.
 func TestMainSuccessPath(t *testing.T) {
@@ -844,14 +915,48 @@ func TestCellTextEditUpClampsCol(t *testing.T) {
 func TestCellTextEditOtherEventIgnored(t *testing.T) {
 	e := &cellTextEdit{Lines: []string{"abc"}, CursorCol: 1}
 	before := e.CursorCol
-	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick})
+	// EventCompositionStart is neither EventChar, EventKeyDown, nor
+	// EventClick — the outer switch's default arm is silent.
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventCompositionStart})
 	if e.CursorCol != before {
-		t.Errorf("Click mutated state: col=%d", e.CursorCol)
+		t.Errorf("Composition mutated state: col=%d", e.CursorCol)
 	}
 	// Unknown keydown code — no-op.
 	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "F13"})
 	if e.CursorCol != before {
 		t.Errorf("F13 mutated state: col=%d", e.CursorCol)
+	}
+}
+
+// TestCellTextEditClickPositionsCursor — a click at widget-local
+// (col, row) inside the content sets (CursorCol, CursorLine) to
+// exactly that cell. Out-of-range coords clamp to the nearest valid
+// cell instead of overshooting.
+func TestCellTextEditClickPositionsCursor(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"hello", "world!", "foo"}, CursorLine: 0, CursorCol: 0}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 1})
+	if e.CursorLine != 1 || e.CursorCol != 3 {
+		t.Errorf("click(3,1): (%d, %d), want (3, 1)", e.CursorCol, e.CursorLine)
+	}
+	// X past end-of-line clamps to len(line).
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 100, Y: 0})
+	if e.CursorLine != 0 || e.CursorCol != 5 { // len("hello") = 5
+		t.Errorf("click(100,0) end-clamp: (%d, %d), want (5, 0)", e.CursorCol, e.CursorLine)
+	}
+	// Y past last line clamps to last line.
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 999})
+	if e.CursorLine != 2 || e.CursorCol != 1 {
+		t.Errorf("click(1,999) row-clamp: (%d, %d), want (1, 2)", e.CursorCol, e.CursorLine)
+	}
+	// Y negative clamps to 0.
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: -3})
+	if e.CursorLine != 0 || e.CursorCol != 2 {
+		t.Errorf("click(2,-3) row-neg: (%d, %d), want (2, 0)", e.CursorCol, e.CursorLine)
+	}
+	// X negative clamps to 0.
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: -5, Y: 0})
+	if e.CursorLine != 0 || e.CursorCol != 0 {
+		t.Errorf("click(-5,0) col-neg: (%d, %d), want (0, 0)", e.CursorCol, e.CursorLine)
 	}
 }
 

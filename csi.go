@@ -77,8 +77,8 @@ func (p *InputParser) Feed(b []byte) []toolkit.Event {
 					p.pending = append(p.pending, stream[i:]...)
 					return events
 				}
-				if ev, ok := decodeCSI(stream[i+2:end], stream[end]); ok {
-					events = append(events, ev)
+				if evs, ok := decodeCSIN(stream[i+2:end], stream[end]); ok {
+					events = append(events, evs...)
 				}
 				i = end + 1
 			} else {
@@ -143,6 +143,34 @@ func (p *InputParser) Flush() []toolkit.Event {
 	return events
 }
 
+// decodeCSIN maps the parameter bytes and final byte of a CSI
+// sequence (the portion after "ESC [") to zero or more [toolkit.Event]
+// values. The second return is false for any unmapped sequence,
+// signalling the caller to silently consume without emitting.
+//
+// A single CSI can produce zero events (e.g. a mouse drag we suppress,
+// a mouse release we suppress) or one event (a keypress, a mouse press
+// promoted to EventClick).
+func decodeCSIN(params []byte, final byte) ([]toolkit.Event, bool) {
+	// SGR mouse report: `CSI < Cb ; Cx ; Cy M|m`.
+	// M = press (or drag while pressed), m = release.
+	// Cb bit 0..1 encodes the button (0=left, 1=middle, 2=right),
+	// bit 5 (0x20) signals "motion" (drag), bit 6 (0x40) signals a
+	// scroll-wheel event (button 4=up, 5=down when combined). We
+	// only emit an EventClick on a genuine press (M, no motion bit)
+	// for the moment — releases and drags are silently consumed.
+	if len(params) > 0 && params[0] == '<' && (final == 'M' || final == 'm') {
+		if ev, ok := decodeMouseSGR(params[1:], final); ok {
+			return []toolkit.Event{ev}, true
+		}
+		return nil, true // recognised, no event produced
+	}
+	if ev, ok := decodeCSI(params, final); ok {
+		return []toolkit.Event{ev}, true
+	}
+	return nil, false
+}
+
 // decodeCSI maps the parameter bytes and final byte of a CSI
 // sequence (the portion after "ESC [") to a [toolkit.Event]. The
 // second return is false for any unmapped sequence, signalling the
@@ -176,4 +204,54 @@ func decodeCSI(params []byte, final byte) (toolkit.Event, bool) {
 		}
 	}
 	return toolkit.Event{}, false
+}
+
+// decodeMouseSGR parses the `Cb ; Cx ; Cy` payload of a SGR mouse
+// report (the parameters between `CSI <` and the final `M`/`m`). It
+// returns an EventClick with 0-indexed (X,Y) in terminal cell coords
+// for a left-button press (Cb == 0 with M as the final). Every other
+// combination (release, drag, right/middle button, scroll wheel) is
+// recognised — the boolean returns false to signal "no event, but
+// this WAS a mouse sequence so consume the bytes silently".
+func decodeMouseSGR(payload []byte, final byte) (toolkit.Event, bool) {
+	// Split on ';' into exactly three decimal fields.
+	var cb, cx, cy int
+	field := 0
+	for _, c := range payload {
+		if c == ';' {
+			field++
+			if field > 2 {
+				return toolkit.Event{}, false
+			}
+			continue
+		}
+		if c < '0' || c > '9' {
+			return toolkit.Event{}, false
+		}
+		v := int(c - '0')
+		switch field {
+		case 0:
+			cb = cb*10 + v
+		case 1:
+			cx = cx*10 + v
+		case 2:
+			cy = cy*10 + v
+		}
+	}
+	if field != 2 {
+		return toolkit.Event{}, false
+	}
+	// Ignore anything but a left-button press. bit 0x20 = motion
+	// (drag), bit 0x40 = scroll wheel, non-M final = release.
+	if final != 'M' || cb&0x20 != 0 || cb&0x40 != 0 || cb&0x03 != 0 {
+		return toolkit.Event{}, false
+	}
+	// SGR coords are 1-indexed; the toolkit convention is 0-indexed.
+	if cx > 0 {
+		cx--
+	}
+	if cy > 0 {
+		cy--
+	}
+	return toolkit.Event{Kind: toolkit.EventClick, X: cx, Y: cy}, true
 }
