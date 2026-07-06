@@ -327,6 +327,83 @@ func TestExplorerBodyChromeContrastIsPerceptible(t *testing.T) {
 }
 
 // -----------------------------------------------------------------
+// v0.3.12 menuBar clicks + hSplit grip drag
+// -----------------------------------------------------------------
+
+// TestExplorerClickOnHelpMenuOpensHelpPopover — a click on the "Help"
+// item in the menuBar toggles the same popover the `?` key does.
+func TestExplorerClickOnHelpMenuOpensHelpPopover(t *testing.T) {
+	// menuBar layout: " File   View   Help" with menuBarPad=1 and
+	// menuBarSep=3. "Help" occupies local X ∈ [15, 19). On the wire
+	// SGR coords are 1-indexed, so X=17 on wire = local X=16.
+	keys := [][]byte{
+		sgrMousePress(17, 1), // click "Help" in menu row (wire row 1)
+		[]byte("q"),
+	}
+	g := captureFrameWithBytes(t, 80, 30, keys, 5*time.Second)
+	// The popover Draw places title at overlay-local Y+1. Overlay
+	// bounds start at row = headerH+2 = 3, so title lands on row 4.
+	// Search a small band around it in case the title's exact row
+	// shifts across cellPopover revisions.
+	foundTitle := false
+	foundBody := false
+	for y := 3; y < 30; y++ {
+		if strings.Contains(g.RowText(y), "Help") {
+			foundTitle = true
+		}
+		if strings.Contains(g.RowText(y), "Quit") {
+			foundBody = true
+		}
+	}
+	if !foundTitle {
+		t.Errorf("help popover title 'Help' not visible after menu click")
+	}
+	if !foundBody {
+		t.Errorf("help popover body item 'Quit' not visible after menu click")
+	}
+}
+
+// TestExplorerClickOnGripStartsDragAndResizes — a mouse press on the
+// grip column followed by a drag to a new X changes the split ratio,
+// visible as the grip character landing on a different column.
+func TestExplorerClickOnGripStartsDragAndResizes(t *testing.T) {
+	// Initial grip column: body width = 80, hSplit starts at X=0 of
+	// body → hSplit.W=80, leftFrac=30, lw = 80*30/100 = 24. Grip at
+	// wire X=25 (1-indexed), body row 2..29 (any is fine — row 5).
+	//
+	// After drag to wire X=41 (local X=40 in body = local X=40 in
+	// hSplit), leftFrac = 40*100/80 = 50. Grip lands at local X=40,
+	// wire X=41.
+	keys := [][]byte{
+		sgrMousePress(25, 5),                 // press on grip
+		sgrMouseDrag(41, 5),                  // drag to new X
+		[]byte("\x1b[<0;41;5m"),              // release at same spot
+		[]byte("q"),
+	}
+	g := captureFrameWithBytes(t, 80, 30, keys, 5*time.Second)
+
+	// The grip glyph is '│' (0x2502). It should now sit at column 40
+	// (0-indexed) of the terminal, NOT at column 24 where it started.
+	// Scan row 5 for the grip glyph.
+	got := -1
+	for x := 0; x < g.Cols; x++ {
+		if g.At(x, 5).Rune == '│' {
+			got = x
+			break
+		}
+	}
+	if got != 40 {
+		t.Errorf("grip position after drag: col %d, want 40", got)
+	}
+}
+
+// sgrMouseDrag returns the SGR mouse motion sequence for a left-drag
+// tick — Cb bit 0x20 set = motion, low bits = 0 = left button held.
+func sgrMouseDrag(col, row int) []byte {
+	return []byte("\x1b[<32;" + itoa(col) + ";" + itoa(row) + "M")
+}
+
+// -----------------------------------------------------------------
 // v0.3.11 mouse-click integration
 // -----------------------------------------------------------------
 

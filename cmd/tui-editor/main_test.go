@@ -619,6 +619,185 @@ func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
 	}
 }
 
+// -----------------------------------------------------------------
+// menuBar (tui-editor local copy)
+// -----------------------------------------------------------------
+
+func TestMenuBarItemXRange(t *testing.T) {
+	mb := &menuBar{Items: []menuItem{
+		{Label: "File"},
+		{Label: "Edit"},
+		{Label: "View"},
+		{Label: "Help"},
+	}}
+	// Item 0: [1, 5)
+	x0, x1 := mb.itemXRange(0)
+	if x0 != 1 || x1 != 5 {
+		t.Errorf("item 0 range = [%d,%d), want [1,5)", x0, x1)
+	}
+	// Item 3: 1 + 3*(4+3) = 22, len 4 → [22, 26)
+	x0, x1 = mb.itemXRange(3)
+	if x0 != 22 || x1 != 26 {
+		t.Errorf("item 3 range = [%d,%d), want [22,26)", x0, x1)
+	}
+	// Out-of-range index.
+	x0, x1 = mb.itemXRange(99)
+	if x0 != -1 || x1 != -1 {
+		t.Errorf("index 99 = (%d,%d), want (-1,-1)", x0, x1)
+	}
+}
+
+func TestMenuBarDrawRendersItems(t *testing.T) {
+	mb := &menuBar{Items: []menuItem{{Label: "X"}}}
+	mb.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 1})
+	pnt := painter.NewPixelPainter(make([]byte, 20*1*4), 20, 1)
+	mb.Draw(pnt, toolkit.DefaultLight())
+	// Empty items still Draws.
+	(&menuBar{}).Draw(pnt, toolkit.DefaultLight())
+}
+
+func TestMenuBarClickFiresOnClick(t *testing.T) {
+	var fired string
+	mb := &menuBar{Items: []menuItem{
+		{Label: "File", OnClick: func() { fired = "File" }},
+		{Label: "Nil"},
+	}}
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 0})
+	if fired != "File" {
+		t.Errorf("File click: fired = %q", fired)
+	}
+	fired = ""
+	// Click on nil-callback item — no crash, no fire.
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 9, Y: 0})
+	if fired != "" {
+		t.Errorf("nil-cb fired: %q", fired)
+	}
+	// Non-click event ignored.
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
+	if fired != "" {
+		t.Errorf("keydown fired: %q", fired)
+	}
+	// Click in gap between items — no fire.
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 6, Y: 0})
+	if fired != "" {
+		t.Errorf("gap fired: %q", fired)
+	}
+}
+
+func TestNewStateWiresMenuItemsToPopovers(t *testing.T) {
+	s := newState()
+	if len(s.menuBar.Items) != 4 {
+		t.Fatalf("menu items = %d, want 4", len(s.menuBar.Items))
+	}
+	cases := []struct {
+		idx int
+		pop **cellPopover
+	}{
+		{0, &s.filePopover},
+		{1, &s.editPopover},
+		{2, &s.viewPopover},
+		{3, &s.helpPopover},
+	}
+	for i, tc := range cases {
+		s.menuBar.Items[tc.idx].OnClick()
+		if !(*tc.pop).Visible {
+			t.Errorf("item %d OnClick did not open its popover", i)
+		}
+		s.menuBar.Items[tc.idx].OnClick()
+		if (*tc.pop).Visible {
+			t.Errorf("item %d OnClick second call did not close", i)
+		}
+	}
+}
+
+// TestPackedVBoxCapturesDragFromClickTarget — mirrors tui-explorer's
+// capture test for the tui-editor's packedVBox copy.
+func TestPackedVBoxCapturesDragFromClickTarget(t *testing.T) {
+	body := &cellTextEdit{Lines: []string{"a", "b"}}
+	overlay := &cellTextEdit{Lines: []string{"o"}}
+	p := &packedVBox{
+		header:   toolkit.NewLabel("H"),
+		body:     body,
+		footer:   toolkit.NewLabel("F"),
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{overlay},
+	}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+
+	// Body click captures body.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 5})
+	if p.dragTarget != body {
+		t.Errorf("body click did not capture body")
+	}
+	// Drag lands where body already got clicked; MouseUp releases.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 3, Y: 8})
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 3, Y: 8})
+	if p.dragTarget != nil {
+		t.Fatal("MouseUp did not release capture")
+	}
+
+	// Overlay click captures overlay.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if p.dragTarget != overlay {
+		t.Errorf("overlay click did not capture overlay")
+	}
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 5, Y: 4})
+
+	// Header click captures header.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 0})
+	if p.dragTarget != p.header {
+		t.Errorf("header click did not capture header")
+	}
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 0, Y: 0})
+
+	// Footer click captures footer.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 19})
+	if p.dragTarget != p.footer {
+		t.Errorf("footer click did not capture footer")
+	}
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 0, Y: 19})
+}
+
+// TestPackedVBoxInvisibleOverlayDoesNotClaimClicks — same coverage
+// as tui-explorer's twin test.
+func TestPackedVBoxInvisibleOverlayDoesNotClaimClicks(t *testing.T) {
+	body := &cellTextEdit{Lines: []string{"line0", "line1", "line2"}}
+	invisible := &cellPopover{Title: "P", Body: []string{"x"}, Visible: false}
+	p := &packedVBox{
+		body:     body,
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{invisible},
+	}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if body.CursorLine != 2 || body.CursorCol != 5 {
+		t.Errorf("invisible overlay ate the click: cursor = (%d,%d), want (5,2)",
+			body.CursorCol, body.CursorLine)
+	}
+	if p.dragTarget != body {
+		t.Errorf("capture went to overlay, not body: %v", p.dragTarget)
+	}
+	invisible.Visible = true
+	p.dragTarget = nil
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if p.dragTarget != invisible {
+		t.Errorf("visible overlay did NOT claim the click: %v", p.dragTarget)
+	}
+}
+
+func TestPackedVBoxDragWithoutCaptureIsDropped(t *testing.T) {
+	body := &cellTextEdit{Lines: []string{"a"}}
+	p := &packedVBox{body: body, headerH: 1, footerH: 1}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 3, Y: 5})
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 3, Y: 5})
+	if p.dragTarget != nil {
+		t.Errorf("stray drag/up mutated dragTarget: %v", p.dragTarget)
+	}
+}
+
 // TestPackedVBoxClickRoutesByHitTest — click routing exercises the
 // header / body / footer band + overlay top-priority.
 func TestPackedVBoxClickRoutesByHitTest(t *testing.T) {

@@ -117,20 +117,78 @@ const (
 // handlers can address them by field name without threading a
 // container tree through every call.
 type state struct {
-	mode      mode
-	file      string // "" == unnamed buffer
-	dirty     bool
-	tv        *cellTextEdit
-	statusbar *toolkit.Label
-	menuBar   *toolkit.Label
-	palette   *cellPopover
-	paletteEn *toolkit.SearchEntry
-	root      toolkit.Widget
+	mode        mode
+	file        string // "" == unnamed buffer
+	dirty       bool
+	tv          *cellTextEdit
+	statusbar   *toolkit.Label
+	menuBar     *menuBar
+	palette     *cellPopover
+	paletteEn   *toolkit.SearchEntry
+	filePopover *cellPopover
+	editPopover *cellPopover
+	viewPopover *cellPopover
+	helpPopover *cellPopover
+	root        toolkit.Widget
 
 	// I/O seams so tests exercise load/save without hitting the real
 	// filesystem.
 	readFile  func(string) ([]byte, error)
 	writeFile func(string, []byte, os.FileMode) error
+}
+
+// menuItem + menuBar mirror the tui-explorer helpers. Kept as a local
+// copy per the "each demo owns its widgets" convention.
+type menuItem struct {
+	Label   string
+	OnClick func()
+}
+
+const menuBarSep = 3 // spaces between items
+const menuBarPad = 1 // left padding before the first item
+
+type menuBar struct {
+	toolkit.Base
+	Items []menuItem
+}
+
+func (m *menuBar) Draw(p painter.Painter, theme *toolkit.Theme) {
+	r := m.Bounds()
+	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.Background.R, G: theme.Background.G, B: theme.Background.B, A: theme.Background.A,
+	})
+	ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
+	x := r.X + menuBarPad
+	for _, item := range m.Items {
+		toolkit.DrawText(p, x, r.Y, item.Label, ink)
+		x += len(item.Label) + menuBarSep
+	}
+}
+
+func (m *menuBar) itemXRange(i int) (int, int) {
+	x := menuBarPad
+	for k, item := range m.Items {
+		if k == i {
+			return x, x + len(item.Label)
+		}
+		x += len(item.Label) + menuBarSep
+	}
+	return -1, -1
+}
+
+func (m *menuBar) OnEvent(ev toolkit.Event) {
+	if ev.Kind != toolkit.EventClick {
+		return
+	}
+	for i, item := range m.Items {
+		x0, x1 := m.itemXRange(i)
+		if ev.X >= x0 && ev.X < x1 {
+			if item.OnClick != nil {
+				item.OnClick()
+			}
+			return
+		}
+	}
 }
 
 // newState builds the widget tree — TextView at centre with flat
@@ -145,7 +203,6 @@ type state struct {
 func newState() *state {
 	tv := &cellTextEdit{Focused: true, Lines: []string{""}}
 
-	menuBar := toolkit.NewLabel("File   Edit   View   Help")
 	statusbar := toolkit.NewLabel("VIEW  |  *scratch*  |  1:1")
 
 	paletteEn := toolkit.NewSearchEntry("")
@@ -154,27 +211,65 @@ func newState() *state {
 		Body:  []string{}, // populated when the user types via paletteEn
 	}
 
+	filePopover := &cellPopover{
+		Title: "File",
+		Body:  []string{"New       (stub)", "Open      (stub)", "Save      (stub)", "Quit      q"},
+	}
+	editPopover := &cellPopover{
+		Title: "Edit",
+		Body:  []string{"Undo      (stub)", "Redo      (stub)", "Cut       (stub)", "Copy      (stub)", "Paste     (stub)"},
+	}
+	viewPopover := &cellPopover{
+		Title: "View",
+		Body:  []string{"Toggle line numbers  (stub)", "Focus editor         i", "Command palette      Ctrl+P"},
+	}
+	helpPopover := &cellPopover{
+		Title: "Help",
+		Body: []string{
+			"i          Insert mode",
+			"Esc        View mode",
+			"Ctrl+P     Command palette",
+			"Ctrl+S     Save",
+			"q          Quit (view mode)",
+			"",
+			"Mouse:",
+			"click text  Move cursor",
+			"click menu  Toggle dropdown",
+		},
+	}
+
+	mb := &menuBar{Items: []menuItem{
+		{Label: "File", OnClick: func() { filePopover.Visible = !filePopover.Visible }},
+		{Label: "Edit", OnClick: func() { editPopover.Visible = !editPopover.Visible }},
+		{Label: "View", OnClick: func() { viewPopover.Visible = !viewPopover.Visible }},
+		{Label: "Help", OnClick: func() { helpPopover.Visible = !helpPopover.Visible }},
+	}}
+
 	body := tv
 
 	root := &packedVBox{
-		header:   menuBar,
+		header:   mb,
 		body:     body,
 		footer:   statusbar,
 		headerH:  1,
 		footerH:  1,
-		overlays: []toolkit.Widget{palette},
+		overlays: []toolkit.Widget{palette, filePopover, editPopover, viewPopover, helpPopover},
 	}
 
 	return &state{
-		mode:      modeView,
-		tv:        tv,
-		statusbar: statusbar,
-		menuBar:   menuBar,
-		palette:   palette,
-		paletteEn: paletteEn,
-		root:      root,
-		readFile:  os.ReadFile,
-		writeFile: os.WriteFile,
+		mode:        modeView,
+		tv:          tv,
+		statusbar:   statusbar,
+		menuBar:     mb,
+		palette:     palette,
+		paletteEn:   paletteEn,
+		filePopover: filePopover,
+		editPopover: editPopover,
+		viewPopover: viewPopover,
+		helpPopover: helpPopover,
+		root:        root,
+		readFile:    os.ReadFile,
+		writeFile:   os.WriteFile,
 	}
 }
 
@@ -389,6 +484,11 @@ type packedVBox struct {
 	headerH  int
 	footerH  int
 	overlays []toolkit.Widget
+	// Drag capture — see tui-explorer/main.go's packedVBox for the
+	// same field group + rationale.
+	dragTarget toolkit.Widget
+	dragDx     int
+	dragDy     int
 }
 
 func (p *packedVBox) SetBounds(r toolkit.Rect) {
@@ -438,10 +538,25 @@ func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 }
 
 func (p *packedVBox) OnEvent(ev toolkit.Event) {
+	if p.dragTarget != nil && (ev.Kind == toolkit.EventMouseDrag || ev.Kind == toolkit.EventMouseUp) {
+		child := ev
+		child.X -= p.dragDx
+		child.Y -= p.dragDy
+		p.dragTarget.OnEvent(child)
+		if ev.Kind == toolkit.EventMouseUp {
+			p.dragTarget = nil
+			p.dragDx = 0
+			p.dragDy = 0
+		}
+		return
+	}
 	if ev.Kind == toolkit.EventClick {
 		// ev.X/Y are widget-local to packedVBox; route by Y band.
 		r := p.Bounds()
 		for _, o := range p.overlays {
+			if v, ok := o.(*cellPopover); ok && !v.Visible {
+				continue
+			}
 			ox, oy := 4, p.headerH+2
 			ow, oh := r.W-8, r.H-p.headerH-p.footerH-4
 			if ow < 1 {
@@ -455,6 +570,7 @@ func (p *packedVBox) OnEvent(ev toolkit.Event) {
 				child.X -= ox
 				child.Y -= oy
 				o.OnEvent(child)
+				p.dragTarget, p.dragDx, p.dragDy = o, ox, oy
 				return
 			}
 		}
@@ -462,18 +578,21 @@ func (p *packedVBox) OnEvent(ev toolkit.Event) {
 		case ev.Y < p.headerH:
 			if p.header != nil {
 				p.header.OnEvent(ev)
+				p.dragTarget, p.dragDx, p.dragDy = p.header, 0, 0
 			}
 		case ev.Y >= r.H-p.footerH:
 			if p.footer != nil {
 				child := ev
 				child.Y -= r.H - p.footerH
 				p.footer.OnEvent(child)
+				p.dragTarget, p.dragDx, p.dragDy = p.footer, 0, r.H-p.footerH
 			}
 		default:
 			if p.body != nil {
 				child := ev
 				child.Y -= p.headerH
 				p.body.OnEvent(child)
+				p.dragTarget, p.dragDx, p.dragDy = p.body, 0, p.headerH
 			}
 		}
 		return

@@ -207,12 +207,17 @@ func decodeCSI(params []byte, final byte) (toolkit.Event, bool) {
 }
 
 // decodeMouseSGR parses the `Cb ; Cx ; Cy` payload of a SGR mouse
-// report (the parameters between `CSI <` and the final `M`/`m`). It
-// returns an EventClick with 0-indexed (X,Y) in terminal cell coords
-// for a left-button press (Cb == 0 with M as the final). Every other
-// combination (release, drag, right/middle button, scroll wheel) is
+// report (the parameters between `CSI <` and the final `M`/`m`) and
+// maps it to one of three toolkit events:
+//
+//   - left press (Cb & 0x63 == 0, final 'M')  → EventClick
+//   - left drag  (Cb & 0x63 == 0, motion bit) → EventMouseDrag
+//   - left release (final 'm', button code 0) → EventMouseUp
+//
+// Every other combination (scroll wheel, middle/right button) is
 // recognised — the boolean returns false to signal "no event, but
-// this WAS a mouse sequence so consume the bytes silently".
+// this WAS a mouse sequence so consume the bytes silently". X/Y are
+// 0-indexed cell coords (SGR reports are 1-indexed on the wire).
 func decodeMouseSGR(payload []byte, final byte) (toolkit.Event, bool) {
 	// Split on ';' into exactly three decimal fields.
 	var cb, cx, cy int
@@ -241,9 +246,9 @@ func decodeMouseSGR(payload []byte, final byte) (toolkit.Event, bool) {
 	if field != 2 {
 		return toolkit.Event{}, false
 	}
-	// Ignore anything but a left-button press. bit 0x20 = motion
-	// (drag), bit 0x40 = scroll wheel, non-M final = release.
-	if final != 'M' || cb&0x20 != 0 || cb&0x40 != 0 || cb&0x03 != 0 {
+	// bit 0x40 = scroll wheel; low bits != 0 = middle/right button.
+	// Either flavour is a non-left mouse event, silently consumed.
+	if cb&0x40 != 0 || cb&0x03 != 0 {
 		return toolkit.Event{}, false
 	}
 	// SGR coords are 1-indexed; the toolkit convention is 0-indexed.
@@ -252,6 +257,14 @@ func decodeMouseSGR(payload []byte, final byte) (toolkit.Event, bool) {
 	}
 	if cy > 0 {
 		cy--
+	}
+	// Caller guarantees final ∈ {'M', 'm'}. Motion bit differentiates
+	// press vs drag; release is always the lowercase form.
+	if final == 'm' {
+		return toolkit.Event{Kind: toolkit.EventMouseUp, X: cx, Y: cy}, true
+	}
+	if cb&0x20 != 0 {
+		return toolkit.Event{Kind: toolkit.EventMouseDrag, X: cx, Y: cy}, true
 	}
 	return toolkit.Event{Kind: toolkit.EventClick, X: cx, Y: cy}, true
 }

@@ -52,20 +52,28 @@ func TestMouseSGRZeroCoordsAreClamped(t *testing.T) {
 	}
 }
 
-func TestMouseSGRLeftReleaseIsConsumed(t *testing.T) {
+func TestMouseSGRLeftReleaseEmitsUp(t *testing.T) {
 	p := NewInputParser()
 	got := p.Feed([]byte("\x1b[<0;5;5m"))
-	if len(got) != 0 {
-		t.Fatalf("release must not emit an event, got %+v", got)
+	if len(got) != 1 {
+		t.Fatalf("release must emit exactly 1 event, got %+v", got)
+	}
+	want := toolkit.Event{Kind: toolkit.EventMouseUp, X: 4, Y: 4}
+	if got[0] != want {
+		t.Fatalf("release event = %+v, want %+v", got[0], want)
 	}
 }
 
-func TestMouseSGRMotionIsConsumed(t *testing.T) {
-	// bit 0x20 set = drag/motion.
+func TestMouseSGRLeftMotionEmitsDrag(t *testing.T) {
+	// bit 0x20 set = drag/motion; low bits = 0 = left button held.
 	p := NewInputParser()
-	got := p.Feed([]byte("\x1b[<32;5;5M"))
-	if len(got) != 0 {
-		t.Fatalf("motion must not emit an event, got %+v", got)
+	got := p.Feed([]byte("\x1b[<32;10;7M"))
+	if len(got) != 1 {
+		t.Fatalf("drag must emit exactly 1 event, got %+v", got)
+	}
+	want := toolkit.Event{Kind: toolkit.EventMouseDrag, X: 9, Y: 6}
+	if got[0] != want {
+		t.Fatalf("drag event = %+v, want %+v", got[0], want)
 	}
 }
 

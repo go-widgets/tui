@@ -348,6 +348,224 @@ func TestFileListDownAtBottomIsNoop(t *testing.T) {
 	}
 }
 
+// -----------------------------------------------------------------
+// menuBar
+// -----------------------------------------------------------------
+
+// TestMenuBarItemXRange covers the layout arithmetic used by both
+// Draw (item start X) and OnEvent (hit-testing).
+func TestMenuBarItemXRange(t *testing.T) {
+	mb := &menuBar{Items: []menuItem{
+		{Label: "File"},
+		{Label: "View"},
+		{Label: "Help"},
+	}}
+	// Item 0: padding 1, len 4 → [1, 5)
+	x0, x1 := mb.itemXRange(0)
+	if x0 != 1 || x1 != 5 {
+		t.Errorf("item 0 range = [%d, %d), want [1, 5)", x0, x1)
+	}
+	// Item 1: 1 + 4 + 3 = 8, len 4 → [8, 12)
+	x0, x1 = mb.itemXRange(1)
+	if x0 != 8 || x1 != 12 {
+		t.Errorf("item 1 range = [%d, %d), want [8, 12)", x0, x1)
+	}
+	// Item 2: 8 + 4 + 3 = 15, len 4 → [15, 19)
+	x0, x1 = mb.itemXRange(2)
+	if x0 != 15 || x1 != 19 {
+		t.Errorf("item 2 range = [%d, %d), want [15, 19)", x0, x1)
+	}
+	// Out-of-range index returns sentinel.
+	x0, x1 = mb.itemXRange(99)
+	if x0 != -1 || x1 != -1 {
+		t.Errorf("out-of-range index returned (%d,%d), want (-1,-1)", x0, x1)
+	}
+}
+
+// TestMenuBarDrawRendersItems covers Draw for both empty + populated.
+func TestMenuBarDrawRendersItems(t *testing.T) {
+	mb := &menuBar{Items: []menuItem{{Label: "A"}, {Label: "Bb"}}}
+	mb.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 1})
+	pnt := painter.NewPixelPainter(make([]byte, 20*1*4), 20, 1)
+	mb.Draw(pnt, toolkit.DefaultLight())
+	// Empty items is also a valid state.
+	mb2 := &menuBar{}
+	mb2.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 1})
+	mb2.Draw(pnt, toolkit.DefaultLight())
+}
+
+// TestMenuBarClickFiresOnClick covers the hit-testing path plus the
+// nil-callback guard.
+func TestMenuBarClickFiresOnClick(t *testing.T) {
+	var fired string
+	mb := &menuBar{Items: []menuItem{
+		{Label: "File", OnClick: func() { fired = "File" }},
+		{Label: "View", OnClick: func() { fired = "View" }},
+		{Label: "Nil"}, // no callback
+	}}
+	// Click inside "File" range (X ∈ [1, 5)).
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 0})
+	if fired != "File" {
+		t.Errorf("click on File: fired = %q, want %q", fired, "File")
+	}
+	fired = ""
+	// Click inside "View" range (X ∈ [8, 12)).
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 10, Y: 0})
+	if fired != "View" {
+		t.Errorf("click on View: fired = %q, want %q", fired, "View")
+	}
+	fired = ""
+	// Click in the 3-space gap between items — no item hit, no fire.
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 6, Y: 0})
+	if fired != "" {
+		t.Errorf("click in gap: fired = %q, want empty", fired)
+	}
+	// Click on the nil-callback item — no crash, no fire.
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 16, Y: 0})
+	if fired != "" {
+		t.Errorf("click on nil-callback item: fired = %q, want empty", fired)
+	}
+	// Non-click event ignored.
+	mb.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
+	if fired != "" {
+		t.Errorf("keydown fired something: %q", fired)
+	}
+}
+
+// TestNewStateWiresMenuItemsToPopovers verifies each menu item's
+// OnClick toggles the matching popover — covers the closures inside
+// newState() that would otherwise stay at 0%.
+func TestNewStateWiresMenuItemsToPopovers(t *testing.T) {
+	s := newState()
+	// menuBar items: File / View / Help — in that order.
+	if len(s.menuBar.Items) != 3 {
+		t.Fatalf("menu items = %d, want 3", len(s.menuBar.Items))
+	}
+	cases := []struct {
+		idx  int
+		name string
+		pop  **cellPopover
+	}{
+		{0, "File", &s.filePopover},
+		{1, "View", &s.viewPopover},
+		{2, "Help", &s.helpPopover},
+	}
+	for _, tc := range cases {
+		if (*tc.pop).Visible {
+			t.Fatalf("%s popover starts visible", tc.name)
+		}
+		s.menuBar.Items[tc.idx].OnClick()
+		if !(*tc.pop).Visible {
+			t.Errorf("%s.OnClick() did not open its popover", tc.name)
+		}
+		s.menuBar.Items[tc.idx].OnClick()
+		if (*tc.pop).Visible {
+			t.Errorf("%s.OnClick() second call did not close its popover", tc.name)
+		}
+	}
+}
+
+// -----------------------------------------------------------------
+// hSplit — grip + drag
+// -----------------------------------------------------------------
+
+// TestHSplitDrawPaintsGripInBorderThenAccent covers both Draw
+// branches (idle → Border colour, dragging → Accent colour).
+func TestHSplitDrawPaintsGrip(t *testing.T) {
+	h := &hSplit{
+		left: toolkit.NewLabel("L"), right: toolkit.NewLabel("R"),
+		leftFrac: 30,
+	}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
+	h.Draw(pnt, toolkit.DefaultLight())
+	// Toggle dragging state so the accent-colour branch of Draw runs.
+	h.dragging = true
+	h.Draw(pnt, toolkit.DefaultLight())
+}
+
+// TestHSplitClickOnGripStartsDragSession — a click at ev.X == lw sets
+// dragging=true and does not route to either child.
+func TestHSplitClickOnGripStartsDragSession(t *testing.T) {
+	fl := &fileList{items: []string{"a", "b"}, selected: 0}
+	tp := &textPreview{}
+	h := &hSplit{left: fl, right: tp, leftFrac: 30}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 20})
+	// gripLocalX = 100 * 30 / 100 = 30.
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 30, Y: 5})
+	if !h.dragging {
+		t.Fatal("click on grip did not set dragging=true")
+	}
+	if fl.selected != 0 {
+		t.Errorf("grip click leaked to fileList: selected = %d, want 0", fl.selected)
+	}
+}
+
+// TestHSplitDragUpdatesLeftFrac — an EventMouseDrag mid-session sets
+// leftFrac to X*100/W clamped to [10,90] and re-runs SetBounds.
+func TestHSplitDragUpdatesLeftFrac(t *testing.T) {
+	fl := &fileList{items: []string{"a"}, selected: 0}
+	tp := &textPreview{}
+	h := &hSplit{left: fl, right: tp, leftFrac: 30, dragging: true}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 10})
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 50, Y: 5})
+	if h.leftFrac != 50 {
+		t.Errorf("drag to X=50: leftFrac = %d, want 50", h.leftFrac)
+	}
+	// Left pane's width should have updated via SetBounds.
+	if fl.Bounds().W != 50 {
+		t.Errorf("fileList width after drag: %d, want 50", fl.Bounds().W)
+	}
+	// Drag below min → clamp to hSplitMinFrac.
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 2, Y: 5})
+	if h.leftFrac != hSplitMinFrac {
+		t.Errorf("drag to X=2: leftFrac = %d, want %d", h.leftFrac, hSplitMinFrac)
+	}
+	// Drag above max → clamp to hSplitMaxFrac.
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 99, Y: 5})
+	if h.leftFrac != hSplitMaxFrac {
+		t.Errorf("drag to X=99: leftFrac = %d, want %d", h.leftFrac, hSplitMaxFrac)
+	}
+	// Zero-width guard — drag on a bounds with W=0 must not divide-by-zero.
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 0, H: 10})
+	before := h.leftFrac
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 5, Y: 5})
+	if h.leftFrac != before {
+		t.Errorf("zero-W drag mutated leftFrac: %d → %d", before, h.leftFrac)
+	}
+}
+
+// TestHSplitMouseUpEndsSession — an EventMouseUp clears dragging.
+func TestHSplitMouseUpEndsSession(t *testing.T) {
+	h := &hSplit{
+		left: toolkit.NewLabel("L"), right: toolkit.NewLabel("R"),
+		leftFrac: 50, dragging: true,
+	}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 20, Y: 3})
+	if h.dragging {
+		t.Fatal("MouseUp did not clear dragging")
+	}
+}
+
+// TestHSplitDragOutsideSessionIsIgnored — a stray EventMouseDrag or
+// EventMouseUp without an active session is silently dropped.
+func TestHSplitDragOutsideSessionIsIgnored(t *testing.T) {
+	fl := &fileList{items: []string{"a"}, selected: 0}
+	tp := &textPreview{}
+	h := &hSplit{left: fl, right: tp, leftFrac: 30}
+	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 10})
+	beforeFrac := h.leftFrac
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 50, Y: 5})
+	if h.leftFrac != beforeFrac {
+		t.Errorf("stray drag mutated leftFrac: %d → %d", beforeFrac, h.leftFrac)
+	}
+	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 50, Y: 5})
+	if h.dragging {
+		t.Fatal("stray up set dragging=true (should stay false)")
+	}
+}
+
 // TestHSplitLayoutDistributesCorrectly covers the left/right split.
 func TestHSplitLayoutDistributesCorrectly(t *testing.T) {
 	left := toolkit.NewLabel("L")
@@ -357,8 +575,10 @@ func TestHSplitLayoutDistributesCorrectly(t *testing.T) {
 	if left.Bounds().W != 30 {
 		t.Errorf("left width = %d, want 30", left.Bounds().W)
 	}
-	if right.Bounds().W != 70 {
-		t.Errorf("right width = %d, want 70", right.Bounds().W)
+	// A 1-cell grip column at X=lw sits between the panes, so right
+	// gets W - lw - 1 = 100 - 30 - 1 = 69 cells.
+	if right.Bounds().W != 69 {
+		t.Errorf("right width = %d, want 69 (100 - 30 grip - 1)", right.Bounds().W)
 	}
 }
 
@@ -627,6 +847,119 @@ func TestPackedVBoxClickWithNilHeaderFooter(t *testing.T) {
 	// Click in body band with nil body — must not crash.
 	p.body = nil
 	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 5})
+}
+
+// TestPackedVBoxCapturesDragFromClickTarget — verifies each of the
+// four click branches (overlay, header, body, footer) captures its
+// target so subsequent drag/up events route back to it. Without
+// capture the drag would jump between bands as the pointer moves.
+func TestPackedVBoxCapturesDragFromClickTarget(t *testing.T) {
+	// bodyFL is a hSplit-wrapped fileList so we can verify drag
+	// events don't leak (fileList itself doesn't care about drag,
+	// but hSplit's grip does — that's the real use case).
+	bodyFL := &fileList{items: []string{"a", "b", "c"}, selected: 0}
+	body := &hSplit{left: bodyFL, right: toolkit.NewLabel("R"), leftFrac: 50}
+	overlayFL := &fileList{items: []string{"o1", "o2"}, selected: 0}
+	p := &packedVBox{
+		header:   toolkit.NewLabel("H"),
+		body:     body,
+		footer:   toolkit.NewLabel("F"),
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{overlayFL},
+	}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 20})
+
+	// Body click at (2, 5). Y=5 in body band → body-local Y=4 →
+	// hSplit lw=20 → X=2 < 20 → left → fileList Y=4 (past len).
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 5})
+	if p.dragTarget != body {
+		t.Errorf("body click did not capture body: %v", p.dragTarget)
+	}
+	if p.dragDy != 1 {
+		t.Errorf("dragDy = %d, want 1 (headerH)", p.dragDy)
+	}
+	// EventMouseDrag at (2, 0) — this is normally the header row.
+	// Capture must forward to body with translated Y = 0-1 = -1.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 2, Y: 0})
+	// MouseUp releases capture.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 2, Y: 0})
+	if p.dragTarget != nil {
+		t.Fatal("MouseUp did not release capture")
+	}
+
+	// Overlay click captures overlay.
+	// Overlay bounds: bx=4, by=3, bw=32, bh=14.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if p.dragTarget != overlayFL {
+		t.Errorf("overlay click did not capture overlay: %v", p.dragTarget)
+	}
+	if p.dragDx != 4 || p.dragDy != 3 {
+		t.Errorf("overlay dragDx,dragDy = (%d,%d), want (4,3)", p.dragDx, p.dragDy)
+	}
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 5, Y: 4})
+
+	// Header click captures header.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 0})
+	if p.dragTarget != p.header {
+		t.Errorf("header click did not capture header: %v", p.dragTarget)
+	}
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 1, Y: 0})
+
+	// Footer click captures footer.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 19})
+	if p.dragTarget != p.footer {
+		t.Errorf("footer click did not capture footer: %v", p.dragTarget)
+	}
+	if p.dragDy != 19 {
+		t.Errorf("footer dragDy = %d, want 19", p.dragDy)
+	}
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 1, Y: 19})
+}
+
+// TestPackedVBoxInvisibleOverlayDoesNotClaimClicks — even though an
+// overlay's Bounds still cover the body inset when invisible, the
+// packedVBox click loop must skip it and let the click reach body.
+func TestPackedVBoxInvisibleOverlayDoesNotClaimClicks(t *testing.T) {
+	body := &fileList{items: []string{"a", "b", "c", "d", "e"}, selected: 0, onSelect: func(int) {}}
+	invisible := &cellPopover{Title: "P", Body: []string{"x"}, Visible: false}
+	p := &packedVBox{
+		body:     body,
+		headerH:  1,
+		footerH:  1,
+		overlays: []toolkit.Widget{invisible},
+	}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+	// Click at (5, 4) — this is inside the overlay bounds region
+	// (bx=4, by=3, bw=12, bh=14). With invisibility filter it must
+	// fall through to the body branch. Body local Y = 4-1 = 3.
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if body.selected != 3 {
+		t.Errorf("invisible overlay ate the click: body.selected = %d, want 3", body.selected)
+	}
+	if p.dragTarget != body {
+		t.Errorf("capture went to overlay, not body: %v", p.dragTarget)
+	}
+	// Now make it visible and click again — it MUST claim the click.
+	invisible.Visible = true
+	p.dragTarget = nil
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
+	if p.dragTarget != invisible {
+		t.Errorf("visible overlay did NOT claim the click: %v", p.dragTarget)
+	}
+}
+
+// TestPackedVBoxDragWithoutCaptureIsDropped — a stray drag/up with
+// no capture in effect never dispatches to any child.
+func TestPackedVBoxDragWithoutCaptureIsDropped(t *testing.T) {
+	fl := &fileList{items: []string{"a"}, selected: 0}
+	p := &packedVBox{body: fl, headerH: 1, footerH: 1}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 3, Y: 5})
+	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 3, Y: 5})
+	if p.dragTarget != nil {
+		t.Errorf("stray drag/up mutated dragTarget: %v", p.dragTarget)
+	}
 }
 
 // TestPackedVBoxOverlayClampsMinBoundsInHitTest — when the frame is

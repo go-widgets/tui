@@ -89,12 +89,77 @@ type state struct {
 	fileList      *fileList
 	content       *textPreview
 	status        *toolkit.Label
-	menuBar       *toolkit.Label
+	menuBar       *menuBar
 	helpPopover   *cellPopover
 	searchPopover *cellPopover
+	filePopover   *cellPopover
+	viewPopover   *cellPopover
 	root          *packedVBox
 	files         map[string]string
 	paths         []string // flat, order-stable list of file paths for fileList indexing
+}
+
+// menuItem is one clickable label in a menuBar. Layout paints the
+// items horizontally separated by menuBarSep spaces; a click inside
+// an item's cell range invokes OnClick. OnClick is optional — a nil
+// value is a no-op (used by decorative separators or coming-soon slots).
+type menuItem struct {
+	Label   string
+	OnClick func()
+}
+
+const menuBarSep = 3 // spaces between items
+const menuBarPad = 1 // left padding before the first item
+
+// menuBar is a cell-native horizontal menu. Items render inline with
+// menuBarSep-space gaps; a click on an item's Label X-range fires
+// its OnClick. Selected-item state is not tracked — dropdowns live
+// as separate popovers wired to each item's OnClick.
+type menuBar struct {
+	toolkit.Base
+	Items []menuItem
+}
+
+func (m *menuBar) Draw(p painter.Painter, theme *toolkit.Theme) {
+	r := m.Bounds()
+	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.Background.R, G: theme.Background.G, B: theme.Background.B, A: theme.Background.A,
+	})
+	ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
+	x := r.X + menuBarPad
+	for _, item := range m.Items {
+		toolkit.DrawText(p, x, r.Y, item.Label, ink)
+		x += len(item.Label) + menuBarSep
+	}
+}
+
+// itemXRange returns the [startX, endX) local-X range of the i-th
+// item — used both by OnEvent (hit-test) and by callers that want to
+// anchor a dropdown at the item's position.
+func (m *menuBar) itemXRange(i int) (int, int) {
+	x := menuBarPad
+	for k, item := range m.Items {
+		if k == i {
+			return x, x + len(item.Label)
+		}
+		x += len(item.Label) + menuBarSep
+	}
+	return -1, -1
+}
+
+func (m *menuBar) OnEvent(ev toolkit.Event) {
+	if ev.Kind != toolkit.EventClick {
+		return
+	}
+	for i, item := range m.Items {
+		x0, x1 := m.itemXRange(i)
+		if ev.X >= x0 && ev.X < x1 {
+			if item.OnClick != nil {
+				item.OnClick()
+			}
+			return
+		}
+	}
 }
 
 // cellPopover is a cell-native modal: title on row Y+0, body lines
@@ -169,7 +234,6 @@ func newState() *state {
 
 	body := &hSplit{left: fl, right: content, leftFrac: 30}
 
-	menuBar := toolkit.NewLabel("File   View   Help")
 	status := toolkit.NewLabel("q: quit  ?: help  /: search  Up/Down: navigate  Enter: open")
 
 	helpPopover := &cellPopover{
@@ -180,6 +244,11 @@ func newState() *state {
 			"/          Toggle search",
 			"Up / Down  Navigate file list",
 			"Enter      Refresh content pane",
+			"",
+			"Mouse:",
+			"click file  Select + preview",
+			"drag grip   Resize sidebar",
+			"click menu  Toggle dropdown",
 		},
 	}
 	searchPopover := &cellPopover{
@@ -189,23 +258,48 @@ func newState() *state {
 			"finder is planned for v0.4)",
 		},
 	}
+	filePopover := &cellPopover{
+		Title: "File",
+		Body: []string{
+			"New       (stub)",
+			"Open      (stub)",
+			"Reload    (stub)",
+			"Quit      q",
+		},
+	}
+	viewPopover := &cellPopover{
+		Title: "View",
+		Body: []string{
+			"Toggle sidebar  (drag grip)",
+			"Focus preview   Enter",
+			"Refresh         Enter",
+		},
+	}
+
+	mb := &menuBar{Items: []menuItem{
+		{Label: "File", OnClick: func() { filePopover.Visible = !filePopover.Visible }},
+		{Label: "View", OnClick: func() { viewPopover.Visible = !viewPopover.Visible }},
+		{Label: "Help", OnClick: func() { helpPopover.Visible = !helpPopover.Visible }},
+	}}
 
 	pv := &packedVBox{
-		header:   menuBar,
+		header:   mb,
 		body:     body,
 		footer:   status,
 		headerH:  1,
 		footerH:  1,
-		overlays: []toolkit.Widget{helpPopover, searchPopover},
+		overlays: []toolkit.Widget{helpPopover, searchPopover, filePopover, viewPopover},
 	}
 
 	s := &state{
 		fileList:      fl,
 		content:       content,
 		status:        status,
-		menuBar:       menuBar,
+		menuBar:       mb,
 		helpPopover:   helpPopover,
 		searchPopover: searchPopover,
+		filePopover:   filePopover,
+		viewPopover:   viewPopover,
 		root:          pv,
 		files:         files,
 		paths:         paths,
@@ -376,11 +470,32 @@ func (f *fileList) OnEvent(ev toolkit.Event) {
 }
 
 // hSplit is a cell-native horizontal split: left widget takes
-// leftFrac percent of the width, right widget takes the rest.
+// leftFrac percent of the width, a 1-cell grip column at X=lw
+// separates left from right, right widget takes the remainder.
+//
+// The grip glyph doubles as a drag handle: a click on it starts a
+// drag session; subsequent EventMouseDrag events (routed here by
+// the packedVBox drag-capture) update leftFrac; EventMouseUp ends
+// the session. leftFrac is clamped to [hSplitMinFrac, hSplitMaxFrac]
+// so neither pane can collapse to zero cells and vanish.
 type hSplit struct {
 	toolkit.Base
 	left, right toolkit.Widget
 	leftFrac    int
+	dragging    bool
+}
+
+const (
+	hSplitGripRune  = '│'
+	hSplitMinFrac   = 10
+	hSplitMaxFrac   = 90
+	hSplitGripFocus = 4 // dragging leftFrac step (unused now, reserved for keyboard resize)
+)
+
+// gripLocalX returns the local-X column the grip occupies given the
+// current bounds and leftFrac.
+func (h *hSplit) gripLocalX() int {
+	return h.Bounds().W * h.leftFrac / 100
 }
 
 func (h *hSplit) SetBounds(r toolkit.Rect) {
@@ -390,7 +505,8 @@ func (h *hSplit) SetBounds(r toolkit.Rect) {
 		h.left.SetBounds(toolkit.Rect{X: r.X, Y: r.Y, W: lw, H: r.H})
 	}
 	if h.right != nil {
-		h.right.SetBounds(toolkit.Rect{X: r.X + lw, Y: r.Y, W: r.W - lw, H: r.H})
+		// right pane starts one column past the grip.
+		h.right.SetBounds(toolkit.Rect{X: r.X + lw + 1, Y: r.Y, W: r.W - lw - 1, H: r.H})
 	}
 }
 
@@ -401,14 +517,60 @@ func (h *hSplit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	if h.right != nil {
 		h.right.Draw(pnt, theme)
 	}
+	// Grip column, painted on top so it stays visible whichever
+	// pane's background it lands over. Border color unless the user
+	// is actively dragging — then Accent for visible feedback.
+	r := h.Bounds()
+	lw := h.gripLocalX()
+	col := toolkit.RGBA{R: theme.Border.R, G: theme.Border.G, B: theme.Border.B, A: theme.Border.A}
+	if h.dragging {
+		col = toolkit.RGBA{R: theme.Accent.R, G: theme.Accent.G, B: theme.Accent.B, A: theme.Accent.A}
+	}
+	// Fill the grip column with the surrounding pane bg first so
+	// the vertical line doesn't inherit a stale character from an
+	// adjacent pane render.
+	pnt.FillRect(painter.Rect{X: r.X + lw, Y: r.Y, W: 1, H: r.H}, painter.RGBA{
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
+	})
+	for y := r.Y; y < r.Y+r.H; y++ {
+		toolkit.DrawText(pnt, r.X+lw, y, string(hSplitGripRune), col)
+	}
 }
 
 func (h *hSplit) OnEvent(ev toolkit.Event) {
-	if ev.Kind == toolkit.EventClick {
-		// ev.X/Y are widget-local to hSplit (parent translated).
-		// Left pane occupies local X ∈ [0, lw); right pane occupies
-		// local X ∈ [lw, W). Y unchanged (full-height children).
-		lw := h.Bounds().W * h.leftFrac / 100
+	// Drag session: subsequent drag/up events (routed here by the
+	// parent packedVBox capture) resize or terminate.
+	if h.dragging {
+		switch ev.Kind {
+		case toolkit.EventMouseDrag:
+			w := h.Bounds().W
+			if w <= 0 {
+				return
+			}
+			frac := ev.X * 100 / w
+			if frac < hSplitMinFrac {
+				frac = hSplitMinFrac
+			}
+			if frac > hSplitMaxFrac {
+				frac = hSplitMaxFrac
+			}
+			h.leftFrac = frac
+			h.SetBounds(h.Bounds())
+			return
+		case toolkit.EventMouseUp:
+			h.dragging = false
+			return
+		}
+	}
+	switch ev.Kind {
+	case toolkit.EventClick:
+		lw := h.gripLocalX()
+		if ev.X == lw {
+			// Click on the grip → enter drag mode. Any subsequent
+			// EventMouseDrag from the parent updates leftFrac.
+			h.dragging = true
+			return
+		}
 		if ev.X < lw {
 			if h.left != nil {
 				h.left.OnEvent(ev)
@@ -417,14 +579,16 @@ func (h *hSplit) OnEvent(ev toolkit.Event) {
 		}
 		if h.right != nil {
 			child := ev
-			child.X -= lw
+			child.X -= lw + 1
 			h.right.OnEvent(child)
 		}
-		return
-	}
-	// Non-click events (arrow keys) still go to the left pane.
-	if h.left != nil {
-		h.left.OnEvent(ev)
+	case toolkit.EventMouseDrag, toolkit.EventMouseUp:
+		// Drag/up outside a session — ignore.
+	default:
+		// Non-mouse events (arrow keys, chars) still go to left pane.
+		if h.left != nil {
+			h.left.OnEvent(ev)
+		}
 	}
 }
 
@@ -451,6 +615,15 @@ type packedVBox struct {
 	headerH  int
 	footerH  int
 	overlays []toolkit.Widget
+	// Drag capture: when EventClick is dispatched to a target, that
+	// target owns subsequent EventMouseDrag / EventMouseUp events
+	// until MouseUp releases the capture. Without this, a drag that
+	// wanders across Y bands would jump between header/body/footer
+	// mid-stroke — e.g. resizing the sidebar and having the drag
+	// events end up in the footer as soon as the pointer strays.
+	dragTarget toolkit.Widget
+	dragDx     int
+	dragDy     int
 }
 
 func (p *packedVBox) SetBounds(r toolkit.Rect) {
@@ -501,6 +674,20 @@ func (p *packedVBox) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 }
 
 func (p *packedVBox) OnEvent(ev toolkit.Event) {
+	// Drag capture: while dragTarget is set, forward drag/up events
+	// to the captured widget with the same translation as the click.
+	if p.dragTarget != nil && (ev.Kind == toolkit.EventMouseDrag || ev.Kind == toolkit.EventMouseUp) {
+		child := ev
+		child.X -= p.dragDx
+		child.Y -= p.dragDy
+		p.dragTarget.OnEvent(child)
+		if ev.Kind == toolkit.EventMouseUp {
+			p.dragTarget = nil
+			p.dragDx = 0
+			p.dragDy = 0
+		}
+		return
+	}
 	if ev.Kind == toolkit.EventClick {
 		// ev.X/Y are widget-local to packedVBox. Vertical layout:
 		//   header at Y ∈ [0, headerH)
@@ -509,7 +696,13 @@ func (p *packedVBox) OnEvent(ev toolkit.Event) {
 		r := p.Bounds()
 		// Overlays sit on top of the body area with the same 4-cell
 		// inset used by SetBounds. Check them first (top-most wins).
+		// Invisible popovers must be skipped — otherwise they'd claim
+		// clicks in their bounds region even when not drawn, silently
+		// swallowing every body click.
 		for _, o := range p.overlays {
+			if v, ok := o.(*cellPopover); ok && !v.Visible {
+				continue
+			}
 			ox, oy := 4, p.headerH+2
 			ow, oh := r.W-8, r.H-p.headerH-p.footerH-4
 			if ow < 1 {
@@ -523,6 +716,7 @@ func (p *packedVBox) OnEvent(ev toolkit.Event) {
 				child.X -= ox
 				child.Y -= oy
 				o.OnEvent(child)
+				p.dragTarget, p.dragDx, p.dragDy = o, ox, oy
 				return
 			}
 		}
@@ -530,18 +724,21 @@ func (p *packedVBox) OnEvent(ev toolkit.Event) {
 		case ev.Y < p.headerH:
 			if p.header != nil {
 				p.header.OnEvent(ev)
+				p.dragTarget, p.dragDx, p.dragDy = p.header, 0, 0
 			}
 		case ev.Y >= r.H-p.footerH:
 			if p.footer != nil {
 				child := ev
 				child.Y -= r.H - p.footerH
 				p.footer.OnEvent(child)
+				p.dragTarget, p.dragDx, p.dragDy = p.footer, 0, r.H-p.footerH
 			}
 		default:
 			if p.body != nil {
 				child := ev
 				child.Y -= p.headerH
 				p.body.OnEvent(child)
+				p.dragTarget, p.dragDx, p.dragDy = p.body, 0, p.headerH
 			}
 		}
 		return
