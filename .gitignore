@@ -1,7 +1,13 @@
 # Command binaries produced by go build ./... at the repo root.
-tui-explorer
-tui-catalogue
-tui-snapshot
+# Leading '/' anchors the pattern to the repo root so cmd/tui-explorer/*
+# and cmd/tui-editor/* source files are NOT ignored — v0.3.4 caught
+# that regression: the arrow-navigation e2e test file silently didn't
+# get committed because .gitignore matched the "tui-explorer" path
+# component instead of only the binary.
+/tui-explorer
+/tui-editor
+/tui-catalogue
+/tui-snapshot
 
 # Test artefacts
 *.out
