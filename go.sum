@@ -1,4 +1,4 @@
 github.com/go-widgets/painter v0.1.0 h1:Qux2JBcSHla5nYtOhhK/Z4WCDDyQmHivKyLdZhDXFAU=
 github.com/go-widgets/painter v0.1.0/go.mod h1:ccmlkH2UmcXQh6rt9Fu2eDt2RI0B5V0POaGmUKeW0EQ=
-github.com/go-widgets/toolkit v0.9.0 h1:UebVfZ1WCRuQD6sJSchan7yHoIXoDl9wGKqICE+DxAQ=
-github.com/go-widgets/toolkit v0.9.0/go.mod h1:gdsk+M0w/DlH+eHCKXd8TjkWN4gswdm5r69J7NVIOTg=
+github.com/go-widgets/toolkit v0.9.1 h1:aQrhYn8WwLQWkELGgqFPd79NNVfkB586cMAfK0LtNYc=
+github.com/go-widgets/toolkit v0.9.1/go.mod h1:gdsk+M0w/DlH+eHCKXd8TjkWN4gswdm5r69J7NVIOTg=
