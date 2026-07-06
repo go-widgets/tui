@@ -643,3 +643,234 @@ func TestMainErrorPath(t *testing.T) {
 		t.Fatalf("main() called osExit(%d), want 4", gotCode)
 	}
 }
+
+// cellTextEdit unit tests.
+func TestCellTextEditSetTextAndText(t *testing.T) {
+	e := &cellTextEdit{}
+	e.SetText("a\nb\nc")
+	if len(e.Lines) != 3 {
+		t.Fatalf("SetText lines = %v, want 3", e.Lines)
+	}
+	if got := e.Text(); got != "a\nb\nc" {
+		t.Errorf("Text() = %q", got)
+	}
+}
+// TestCellTextEditTextOnNilLines exercises the "len==0 return \"\""
+// early-return branch.
+func TestCellTextEditTextOnNilLines(t *testing.T) {
+	e := &cellTextEdit{} // Lines is nil
+	if got := e.Text(); got != "" {
+		t.Errorf("Text() on nil = %q, want empty", got)
+	}
+}
+
+func TestCellTextEditSetTextEmpty(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"foo"}}
+	e.SetText("")
+	if len(e.Lines) != 1 || e.Lines[0] != "" {
+		t.Errorf("SetText(\"\"): %v, want [\"\"]", e.Lines)
+	}
+	if got := e.Text(); got != "" {
+		t.Errorf("Text() empty = %q", got)
+	}
+}
+func TestCellTextEditSetTextTrailingNewline(t *testing.T) {
+	e := &cellTextEdit{}
+	e.SetText("hello\n")
+	if len(e.Lines) != 1 || e.Lines[0] != "hello" {
+		t.Errorf("trailing newline: %v", e.Lines)
+	}
+}
+func TestCellTextEditDrawEmpty(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{""}, Focused: true}
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3})
+	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
+	e.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellTextEditDrawWithContent(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"a", "b", "c"}, CursorLine: 1, CursorCol: 0, Focused: true}
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 5})
+	pnt := painter.NewPixelPainter(make([]byte, 10*5*4), 10, 5)
+	e.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellTextEditDrawUnfocusedNoCursor(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"a"}, Focused: false}
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3})
+	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
+	e.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellTextEditDrawClipsBeyondBounds(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"a", "b", "c", "d", "e"}, Focused: true}
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3}) // 3 rows, 5 lines
+	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
+	e.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellTextEditDrawCursorPastRight(t *testing.T) {
+	// Cursor at column past bounds width — Draw skips the cursor.
+	e := &cellTextEdit{Lines: []string{"short"}, CursorLine: 0, CursorCol: 50, Focused: true}
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3})
+	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
+	e.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellTextEditDrawCursorPastBottom(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"a"}, CursorLine: 50, CursorCol: 0, Focused: true}
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3})
+	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
+	e.Draw(pnt, toolkit.DefaultLight())
+}
+
+// cellTextEdit editing OnEvent tests.
+func TestCellTextEditInsertChar(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{""}}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "a"})
+	if e.Lines[0] != "a" || e.CursorCol != 1 {
+		t.Errorf("after 'a': lines=%v col=%d", e.Lines, e.CursorCol)
+	}
+}
+func TestCellTextEditInsertBeyondEndClamps(t *testing.T) {
+	// Cursor past line length: insert clamps back.
+	e := &cellTextEdit{Lines: []string{"abc"}, CursorCol: 100}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "X"})
+	if e.Lines[0] != "abcX" {
+		t.Errorf("cursor clamp on insert: %v", e.Lines)
+	}
+}
+func TestCellTextEditNilLinesGetsBootstrapped(t *testing.T) {
+	// Event on empty Lines slice bootstraps to [""].
+	e := &cellTextEdit{}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
+	if len(e.Lines) != 1 || e.Lines[0] != "x" {
+		t.Errorf("bootstrap: %v", e.Lines)
+	}
+}
+func TestCellTextEditBackspaceMidLine(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"abc"}, CursorCol: 2}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Backspace"})
+	if e.Lines[0] != "ac" || e.CursorCol != 1 {
+		t.Errorf("backspace: %v col=%d", e.Lines, e.CursorCol)
+	}
+}
+func TestCellTextEditBackspaceAtLineStartMerges(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"a", "b"}, CursorLine: 1, CursorCol: 0}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Backspace"})
+	if len(e.Lines) != 1 || e.Lines[0] != "ab" {
+		t.Errorf("backspace merge: %v", e.Lines)
+	}
+	if e.CursorLine != 0 || e.CursorCol != 1 {
+		t.Errorf("cursor after merge: line=%d col=%d", e.CursorLine, e.CursorCol)
+	}
+}
+func TestCellTextEditBackspaceAtDocStartIsNoop(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{""}, CursorLine: 0, CursorCol: 0}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Backspace"})
+	if len(e.Lines) != 1 || e.CursorLine != 0 || e.CursorCol != 0 {
+		t.Errorf("backspace at 0,0 mutated state: %+v", e)
+	}
+}
+func TestCellTextEditEnterSplitsLine(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"abc"}, CursorCol: 1}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
+	if len(e.Lines) != 2 || e.Lines[0] != "a" || e.Lines[1] != "bc" {
+		t.Errorf("enter split: %v", e.Lines)
+	}
+	if e.CursorLine != 1 || e.CursorCol != 0 {
+		t.Errorf("cursor after enter: %d:%d", e.CursorLine, e.CursorCol)
+	}
+}
+func TestCellTextEditEnterClampsPastLineEnd(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"a"}, CursorCol: 50}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
+	if len(e.Lines) != 2 || e.Lines[0] != "a" || e.Lines[1] != "" {
+		t.Errorf("enter clamped: %v", e.Lines)
+	}
+}
+func TestCellTextEditArrows(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"abc", "de"}, CursorLine: 0, CursorCol: 2}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Right"})
+	if e.CursorCol != 3 {
+		t.Errorf("Right: col=%d", e.CursorCol)
+	}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if e.CursorLine != 1 || e.CursorCol != 2 {
+		t.Errorf("Down: line=%d col=%d", e.CursorLine, e.CursorCol)
+	}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Left"})
+	if e.CursorCol != 1 {
+		t.Errorf("Left: col=%d", e.CursorCol)
+	}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	if e.CursorLine != 0 || e.CursorCol != 1 {
+		t.Errorf("Up: line=%d col=%d", e.CursorLine, e.CursorCol)
+	}
+}
+func TestCellTextEditArrowsAtEdgesAreNoops(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"abc"}, CursorLine: 0, CursorCol: 0}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Left"})
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	if e.CursorLine != 0 || e.CursorCol != 0 {
+		t.Errorf("Left/Up at 0,0: %+v", e)
+	}
+	e.CursorCol = 3
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Right"})
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if e.CursorLine != 0 || e.CursorCol != 3 {
+		t.Errorf("Right/Down at end: %+v", e)
+	}
+}
+func TestCellTextEditArrowClampsCol(t *testing.T) {
+	// Move Down from a long line to a shorter one — col clamps.
+	e := &cellTextEdit{Lines: []string{"abcde", "f"}, CursorLine: 0, CursorCol: 4}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if e.CursorLine != 1 || e.CursorCol != 1 {
+		t.Errorf("Down col clamp: line=%d col=%d", e.CursorLine, e.CursorCol)
+	}
+	// And back Up: same.
+	e.CursorLine = 1
+	e.CursorCol = 1
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	if e.CursorLine != 0 || e.CursorCol != 1 {
+		t.Errorf("Up col: line=%d col=%d", e.CursorLine, e.CursorCol)
+	}
+}
+// TestCellTextEditUpClampsCol covers the "col > len(prev line)" clamp
+// on Up (the Down variant is covered by TestCellTextEditArrowClampsCol).
+func TestCellTextEditUpClampsCol(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"a", "bcde"}, CursorLine: 1, CursorCol: 3}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"})
+	if e.CursorLine != 0 || e.CursorCol != 1 {
+		t.Errorf("Up col clamp: line=%d col=%d, want 0:1", e.CursorLine, e.CursorCol)
+	}
+}
+func TestCellTextEditOtherEventIgnored(t *testing.T) {
+	e := &cellTextEdit{Lines: []string{"abc"}, CursorCol: 1}
+	before := e.CursorCol
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick})
+	if e.CursorCol != before {
+		t.Errorf("Click mutated state: col=%d", e.CursorCol)
+	}
+	// Unknown keydown code — no-op.
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "F13"})
+	if e.CursorCol != before {
+		t.Errorf("F13 mutated state: col=%d", e.CursorCol)
+	}
+}
+
+// cellPopover tests.
+func TestCellPopoverInvisibleNoop(t *testing.T) {
+	p := &cellPopover{Title: "T", Body: []string{"a"}, Visible: false}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 30, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 30*10*4), 30, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellPopoverVisibleRenders(t *testing.T) {
+	p := &cellPopover{Title: "T", Body: []string{"a", "b"}, Visible: true}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 30, H: 10})
+	pnt := painter.NewPixelPainter(make([]byte, 30*10*4), 30, 10)
+	p.Draw(pnt, toolkit.DefaultLight())
+}
+func TestCellPopoverBodyClampedToBounds(t *testing.T) {
+	p := &cellPopover{Title: "T", Body: []string{"a", "b", "c", "d"}, Visible: true}
+	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 5}) // need=7, capped
+	pnt := painter.NewPixelPainter(make([]byte, 20*5*4), 20, 5)
+	p.Draw(pnt, toolkit.DefaultLight())
+}

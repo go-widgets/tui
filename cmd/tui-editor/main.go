@@ -120,10 +120,10 @@ type state struct {
 	mode      mode
 	file      string // "" == unnamed buffer
 	dirty     bool
-	tv        *toolkit.TextView
+	tv        *cellTextEdit
 	statusbar *toolkit.Label
 	menuBar   *toolkit.Label
-	palette   *toolkit.Popover
+	palette   *cellPopover
 	paletteEn *toolkit.SearchEntry
 	root      toolkit.Widget
 
@@ -136,23 +136,29 @@ type state struct {
 // newState builds the widget tree — TextView at centre with flat
 // Label chrome (menu-style header + status footer) — wired through
 // packedVBox so header + footer stay 1 cell tall and TextView takes
-// the remaining vertical space. A toolkit.VBox would divide equally,
-// giving each element a third of the screen — that layout bug
-// shipped in v0.3.0 / v0.3.1 and is what v0.3.2 fixes.
+// the remaining vertical space. The body wraps TextView in a
+// cellBodyFill helper so the pane background uses theme.SurfaceAlt
+// (perceptible against the near-black chrome in dark mode); a bare
+// toolkit.TextView draws only its own border + cursor and leaves
+// the pane background inheriting the frame Background fill, which
+// makes the panel boundary imperceptible in dark theme.
 func newState() *state {
-	tv := toolkit.NewTextView("")
-	tv.Focused = true
+	tv := &cellTextEdit{Focused: true, Lines: []string{""}}
 
 	menuBar := toolkit.NewLabel("File   Edit   View   Help")
 	statusbar := toolkit.NewLabel("VIEW  |  *scratch*  |  1:1")
 
 	paletteEn := toolkit.NewSearchEntry("")
-	palette := toolkit.NewPopover(paletteEn)
-	palette.Title = "Command palette"
+	palette := &cellPopover{
+		Title: "Command palette",
+		Body:  []string{}, // populated when the user types via paletteEn
+	}
+
+	body := tv
 
 	root := &packedVBox{
 		header:   menuBar,
-		body:     tv,
+		body:     body,
 		footer:   statusbar,
 		headerH:  1,
 		footerH:  1,
@@ -169,6 +175,184 @@ func newState() *state {
 		root:      root,
 		readFile:  os.ReadFile,
 		writeFile: os.WriteFile,
+	}
+}
+
+// cellTextEdit is a cell-native editable text buffer: 1 cell per
+// glyph, arrow-key navigation, insert on EventChar, Backspace, Enter
+// to split a line. Fills its bounds with SurfaceAlt so the pane
+// boundary is visible against near-black chrome rows in dark theme.
+// Replaces toolkit.TextView which uses lineH = GlyphHeight + 4 = 11
+// cells per line in cell mode (only 2 lines visible in a 22-row
+// body) + fills with Surface (imperceptible from Background).
+type cellTextEdit struct {
+	toolkit.Base
+	Lines      []string
+	CursorLine int
+	CursorCol  int
+	Focused    bool
+}
+
+func (t *cellTextEdit) Text() string {
+	if len(t.Lines) == 0 {
+		return ""
+	}
+	total := 0
+	for _, l := range t.Lines {
+		total += len(l) + 1
+	}
+	buf := make([]byte, 0, total)
+	for i, l := range t.Lines {
+		if i > 0 {
+			buf = append(buf, '\n')
+		}
+		buf = append(buf, l...)
+	}
+	return string(buf)
+}
+
+func (t *cellTextEdit) SetText(s string) {
+	t.Lines = nil
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			t.Lines = append(t.Lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		t.Lines = append(t.Lines, s[start:])
+	}
+	if len(t.Lines) == 0 {
+		t.Lines = []string{""}
+	}
+	t.CursorLine = 0
+	t.CursorCol = 0
+}
+
+func (t *cellTextEdit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	r := t.Bounds()
+	// SurfaceAlt-filled pane background — perceptibly different from
+	// chrome (Background) so the panel edge is visible in any theme.
+	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
+	})
+	ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
+	for i, line := range t.Lines {
+		y := r.Y + i
+		if y >= r.Y+r.H {
+			break
+		}
+		toolkit.DrawText(pnt, r.X+1, y, line, ink)
+	}
+	// Cursor: reverse-video single cell at the caret position.
+	if t.Focused && t.CursorLine >= 0 && t.CursorLine < r.H {
+		cx := r.X + 1 + t.CursorCol
+		cy := r.Y + t.CursorLine
+		if cx < r.X+r.W && cy < r.Y+r.H {
+			pnt.FillRect(painter.Rect{X: cx, Y: cy, W: 1, H: 1}, painter.RGBA{
+				R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A,
+			})
+		}
+	}
+}
+
+func (t *cellTextEdit) OnEvent(ev toolkit.Event) {
+	if len(t.Lines) == 0 {
+		t.Lines = []string{""}
+	}
+	switch ev.Kind {
+	case toolkit.EventChar:
+		line := t.Lines[t.CursorLine]
+		if t.CursorCol > len(line) {
+			t.CursorCol = len(line)
+		}
+		t.Lines[t.CursorLine] = line[:t.CursorCol] + ev.Code + line[t.CursorCol:]
+		t.CursorCol += len(ev.Code)
+	case toolkit.EventKeyDown:
+		switch ev.Code {
+		case "Backspace":
+			line := t.Lines[t.CursorLine]
+			if t.CursorCol > 0 && t.CursorCol <= len(line) {
+				t.Lines[t.CursorLine] = line[:t.CursorCol-1] + line[t.CursorCol:]
+				t.CursorCol--
+			} else if t.CursorCol == 0 && t.CursorLine > 0 {
+				prev := t.Lines[t.CursorLine-1]
+				t.CursorCol = len(prev)
+				t.Lines[t.CursorLine-1] = prev + line
+				t.Lines = append(t.Lines[:t.CursorLine], t.Lines[t.CursorLine+1:]...)
+				t.CursorLine--
+			}
+		case "Enter":
+			line := t.Lines[t.CursorLine]
+			if t.CursorCol > len(line) {
+				t.CursorCol = len(line)
+			}
+			head, tail := line[:t.CursorCol], line[t.CursorCol:]
+			t.Lines[t.CursorLine] = head
+			t.Lines = append(t.Lines[:t.CursorLine+1], append([]string{tail}, t.Lines[t.CursorLine+1:]...)...)
+			t.CursorLine++
+			t.CursorCol = 0
+		case "Up":
+			if t.CursorLine > 0 {
+				t.CursorLine--
+				if t.CursorCol > len(t.Lines[t.CursorLine]) {
+					t.CursorCol = len(t.Lines[t.CursorLine])
+				}
+			}
+		case "Down":
+			if t.CursorLine < len(t.Lines)-1 {
+				t.CursorLine++
+				if t.CursorCol > len(t.Lines[t.CursorLine]) {
+					t.CursorCol = len(t.Lines[t.CursorLine])
+				}
+			}
+		case "Left":
+			if t.CursorCol > 0 {
+				t.CursorCol--
+			}
+		case "Right":
+			if t.CursorCol < len(t.Lines[t.CursorLine]) {
+				t.CursorCol++
+			}
+		}
+	}
+}
+
+// cellPopover — cell-native modal, same shape as
+// cmd/tui-explorer's helper. Reproduced here (each demo owns its
+// local copy) rather than shared because these demos are meant to
+// be forkable starting points, not a package dependency.
+type cellPopover struct {
+	toolkit.Base
+	Title   string
+	Body    []string
+	Visible bool
+}
+
+func (p *cellPopover) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	if !p.Visible {
+		return
+	}
+	r := p.Bounds()
+	need := 3 + len(p.Body)
+	if need > r.H {
+		need = r.H
+	}
+	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: need}, painter.RGBA{
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
+	})
+	pnt.StrokeRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: need}, painter.RGBA{
+		R: theme.Border.R, G: theme.Border.G, B: theme.Border.B, A: theme.Border.A,
+	}, 1)
+	ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
+	toolkit.DrawText(pnt, r.X+2, r.Y+1, p.Title, ink)
+	for i, line := range p.Body {
+		y := r.Y + 2 + i
+		if y >= r.Y+need-1 {
+			break
+		}
+		toolkit.DrawText(pnt, r.X+2, y, line, ink)
 	}
 }
 
