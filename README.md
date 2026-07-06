@@ -34,9 +34,74 @@ widgets := []painter.Widget{
 _ = tui.RenderOnce(os.Stdout, widgets, nil) // nil theme = LightTheme
 ```
 
-An `App` runner with input, resize, and cleanup handling is future
-work — this repo intentionally leaves that surface for a follow-up
-cycle rather than shipping a half-baked event loop.
+## Interactive `tui.App` runner (v0.3.x)
+
+For a full interactive experience — raw mode + alt-screen + input
+loop + resize + cleanup — instantiate a `tui.App`:
+
+```go
+import (
+    "os"
+    "github.com/go-widgets/toolkit"
+    "github.com/go-widgets/tui"
+)
+
+func main() {
+    app := tui.NewApp()
+    app.Root = buildScene()          // toolkit.Widget hierarchy
+    app.Keys["q"] = func(a *tui.App) { a.Quit() }
+    app.Keys["Ctrl+C"] = func(a *tui.App) { a.Quit() }
+    os.Exit(app.Run())
+}
+```
+
+`App.Run()` enters alt-screen, sets raw mode, spawns a stdin reader,
+dispatches events to `Root.OnEvent` (with global handlers running
+first), reacts to `SIGWINCH` for resize, and always restores the
+terminal on exit — even on panic, via a deferred `TTY.Leave` inside
+a defer/recover chain.
+
+Keys handlers may call `a.Consume()` to prevent the current event
+from also reaching `Root` — needed for mode-switching editors
+(pressing `i` to enter edit mode without also inserting `i` into
+the buffer).
+
+Two reference demos ship in `cmd/`:
+
+- `cmd/tui-explorer` — k9s-style file browser (file list + preview
+  pane + arrow-key navigation + help/search popovers).
+- `cmd/tui-editor` — loom-style modal text editor (View / Edit /
+  Palette modes + file open + Ctrl+S save + Ctrl+P palette).
+
+Both are exercised by real pty-based e2e tests
+(`//go:build unix && integration`) that spawn the binary under a
+real terminal, send real key bytes, and assert on the rendered
+frame. **These tests catch layout + event-loop bugs that seam-based
+unit tests miss** — see the v0.3.2 / v0.3.3 / v0.3.4 release notes
+for the concrete regressions this protocol caught.
+
+### Cell-mode widget guidance
+
+Most `toolkit` widgets are designed for pixel rendering — their
+internal pad constants (`AlertPadY = 8`, `MenuBarH = 22`, …) are
+pixels in `PixelPainter` mode. In `tui.RenderToolkit` /
+`tui.App` cell mode, those same integers count CELLS, so widgets
+that lean on large pad constants render at cell-inappropriate sizes.
+
+Cell-native (render at ~1 cell per glyph — safe in `tui.App`):
+`Label`, `TextView`, `Entry`, `Button`, `Popover`.
+
+Pixel-tuned (usable but visually inflated in cell mode):
+`Alert`, `Card`, `Stat`, `HeaderBar`, `Toast`, `Banner`.
+
+Pixel-only (render poorly at any small cell size — replace with
+local cell-native helpers in `tui.App` consumers):
+`MenuBar`, `Statusbar`, `TreeView`, `Notebook`, `HPaned`,
+`VPaned`, `Scale`, `LevelBar`.
+
+The `cmd/tui-explorer` + `cmd/tui-editor` demos illustrate the
+pattern: they use local `packedVBox`, `hSplit`, `fileList`
+helpers instead of the pixel-tuned toolkit equivalents.
 
 ## Sizing
 
@@ -86,6 +151,25 @@ Internally uses `tui.RenderToolkit` (the bridge that accepts
 `toolkit.Widget` and translates `toolkit.Theme` to what
 `painter.CellPainter` expects) so the on-screen widgets are the
 same objects a wasm gallery or a native window would compose.
+
+For the interactive demos (`tui.App` powered):
+
+```bash
+# k9s-style file browser with arrow navigation
+go run ./cmd/tui-explorer
+
+# vi-style modal editor
+go run ./cmd/tui-editor --file=path/to/file.txt
+```
+
+To run the pty-based end-to-end integration tests:
+
+```bash
+go test -tags integration ./cmd/tui-explorer/... ./cmd/tui-editor/...
+```
+
+These verify the rendered frame after real key input in a real
+pty, catching layout + interaction bugs that unit tests miss.
 
 ## Design axiom
 
