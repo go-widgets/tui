@@ -1,0 +1,9 @@
+# Command binaries produced by go build ./... at the repo root.
+tui-explorer
+tui-catalogue
+tui-snapshot
+
+# Test artefacts
+*.out
+coverage.out
+coverage-cmd.out
