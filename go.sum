@@ -2,3 +2,7 @@ github.com/go-widgets/painter v0.1.0 h1:Qux2JBcSHla5nYtOhhK/Z4WCDDyQmHivKyLdZhDX
 github.com/go-widgets/painter v0.1.0/go.mod h1:ccmlkH2UmcXQh6rt9Fu2eDt2RI0B5V0POaGmUKeW0EQ=
 github.com/go-widgets/toolkit v0.9.2 h1:Lo/NE1eZxUUpJyTHq+x8sY7EKVAjpBSdLGmHJdap5Do=
 github.com/go-widgets/toolkit v0.9.2/go.mod h1:gdsk+M0w/DlH+eHCKXd8TjkWN4gswdm5r69J7NVIOTg=
+golang.org/x/sys v0.46.0 h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=
+golang.org/x/sys v0.46.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+golang.org/x/term v0.44.0 h1:0rLvDRCtNj0gZkyIXhCyOb2OAzEhLVqc4B+hrsBhrmc=
+golang.org/x/term v0.44.0/go.mod h1:7ze4MdzUzLXpSAoFP1H0bOI9aXDqveSvatT5vKcFh2Y=

@@ -1,0 +1,179 @@
+// Copyright (c) 2026 the go-widgets/tui authors. All rights reserved.
+// Use of this source code is governed by a BSD-3-Clause license that can be
+// found in the LICENSE file at the root of this repository.
+
+package tui
+
+import (
+	"unicode/utf8"
+
+	"github.com/go-widgets/toolkit"
+)
+
+// InputParser reads bytes from a terminal stdin stream and emits
+// [toolkit.Event] values. A single call to [InputParser.Feed] may
+// produce zero, one, or many events: typing "abc" yields three
+// [toolkit.EventChar] events, pasting a control sequence like
+// "\x1b[A" yields one arrow-up event but consumes three bytes.
+//
+// The toolkit exposes [toolkit.EventKeyDown] for named-key presses
+// (Enter, Tab, arrows, Escape, …) and [toolkit.EventChar] for
+// printable characters — the parser routes accordingly.
+//
+// The pending buffer holds the incomplete tail of the last Feed
+// call: a lone ESC (0x1B) whose next byte has not arrived, an ESC
+// [ … partial CSI sequence still waiting for its final byte
+// (0x40..0x7E), or a partial UTF-8 rune (1–3 bytes of a multi-byte
+// codepoint split across two Reads). It is consumed automatically
+// on the next Feed call, or drained by [InputParser.Flush] on an
+// input-idle deadline.
+type InputParser struct {
+	// pending is the incomplete tail of the previous Feed call.
+	pending []byte
+}
+
+// NewInputParser returns a fresh parser with an empty buffer.
+func NewInputParser() *InputParser {
+	return &InputParser{}
+}
+
+// Feed hands b bytes to the parser and returns any events that
+// completed as a result. Bytes belonging to an incomplete sequence
+// (a lone ESC, a partial CSI, a partial UTF-8 rune) are buffered
+// internally and consumed on the next Feed call.
+//
+// The classic Escape-vs-CSI ambiguity is resolved as follows: a
+// lone ESC at the end of the buffer is held pending; on the next
+// Feed a leading '[' starts a CSI sequence, any other byte causes
+// the held ESC to be emitted as "Escape" and the following byte is
+// then processed as a fresh input. Callers waiting on an idle
+// deadline flush the held ESC via [InputParser.Flush].
+func (p *InputParser) Feed(b []byte) []toolkit.Event {
+	stream := append(p.pending, b...)
+	p.pending = nil
+	var events []toolkit.Event
+
+	i := 0
+	for i < len(stream) {
+		c := stream[i]
+		switch {
+		case c == 0x1B:
+			// ESC — need at least one more byte to disambiguate.
+			if i+1 >= len(stream) {
+				p.pending = append(p.pending, stream[i:]...)
+				return events
+			}
+			if stream[i+1] == '[' {
+				// Look for a CSI final byte in 0x40..0x7E.
+				end := -1
+				for j := i + 2; j < len(stream); j++ {
+					if stream[j] >= 0x40 && stream[j] <= 0x7E {
+						end = j
+						break
+					}
+				}
+				if end < 0 {
+					// Incomplete CSI — buffer the whole sequence.
+					p.pending = append(p.pending, stream[i:]...)
+					return events
+				}
+				if ev, ok := decodeCSI(stream[i+2:end], stream[end]); ok {
+					events = append(events, ev)
+				}
+				i = end + 1
+			} else {
+				// ESC followed by a non-'[' byte — emit Escape and
+				// reprocess the following byte as fresh input.
+				events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Escape"})
+				i++
+			}
+		case c == 0x0D:
+			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
+			i++
+		case c == 0x09:
+			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Tab"})
+			i++
+		case c == 0x7F || c == 0x08:
+			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Backspace"})
+			i++
+		case c == 0x03:
+			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+C"})
+			i++
+		case c == 0x04:
+			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+D"})
+			i++
+		case c == 0x1A:
+			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Z"})
+			i++
+		case c >= 0x20 && c <= 0x7E:
+			events = append(events, toolkit.Event{Kind: toolkit.EventChar, Code: string(rune(c))})
+			i++
+		case c >= 0x80:
+			// Multi-byte UTF-8. If DecodeRune reports an invalid
+			// leading byte AND we have fewer than 4 bytes left,
+			// treat it as a possibly-split rune and buffer.
+			r, sz := utf8.DecodeRune(stream[i:])
+			if r == utf8.RuneError && sz == 1 && len(stream)-i < 4 {
+				p.pending = append(p.pending, stream[i:]...)
+				return events
+			}
+			events = append(events, toolkit.Event{Kind: toolkit.EventChar, Code: string(r)})
+			i += sz
+		default:
+			// Unmapped control byte (NUL, LF, form-feed, …) —
+			// silently consume so the caller's stream advances.
+			i++
+		}
+	}
+	return events
+}
+
+// Flush emits any pending ESC (or partial CSI) as an "Escape"
+// event and clears the buffer. Callers invoke it on an input-idle
+// deadline to resolve the Escape-vs-CSI ambiguity in favour of a
+// plain Escape. A partial UTF-8 rune is discarded silently — its
+// tail bytes would be indistinguishable from an unrelated new
+// keystroke by the time an idle timeout fires.
+func (p *InputParser) Flush() []toolkit.Event {
+	var events []toolkit.Event
+	if len(p.pending) > 0 && p.pending[0] == 0x1B {
+		events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Escape"})
+	}
+	p.pending = nil
+	return events
+}
+
+// decodeCSI maps the parameter bytes and final byte of a CSI
+// sequence (the portion after "ESC [") to a [toolkit.Event]. The
+// second return is false for any unmapped sequence, signalling the
+// caller to silently consume without emitting.
+func decodeCSI(params []byte, final byte) (toolkit.Event, bool) {
+	if len(params) == 0 {
+		switch final {
+		case 'A':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"}, true
+		case 'B':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"}, true
+		case 'C':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Right"}, true
+		case 'D':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Left"}, true
+		case 'H':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Home"}, true
+		case 'F':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "End"}, true
+		}
+		return toolkit.Event{}, false
+	}
+	if final == '~' {
+		switch string(params) {
+		case "3":
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Delete"}, true
+		case "5":
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "PageUp"}, true
+		case "6":
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "PageDown"}, true
+		}
+	}
+	return toolkit.Event{}, false
+}
