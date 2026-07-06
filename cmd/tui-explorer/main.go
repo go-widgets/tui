@@ -282,7 +282,7 @@ func splitLines(s string) []string {
 func (t *textPreview) Draw(p painter.Painter, theme *toolkit.Theme) {
 	r := t.Bounds()
 	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
-		R: theme.Surface.R, G: theme.Surface.G, B: theme.Surface.B, A: theme.Surface.A,
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
 	})
 	for i, line := range t.lines {
 		y := r.Y + i
@@ -309,7 +309,7 @@ func (f *fileList) Draw(p painter.Painter, theme *toolkit.Theme) {
 	// Paint the full pane background first so surface color fills
 	// even the rows past len(items).
 	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
-		R: theme.Surface.R, G: theme.Surface.G, B: theme.Surface.B, A: theme.Surface.A,
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
 	})
 	for i, item := range f.items {
 		y := r.Y + i
