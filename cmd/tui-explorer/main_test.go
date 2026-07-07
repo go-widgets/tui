@@ -17,7 +17,36 @@ import (
 	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
+	"github.com/go-widgets/tui/syntax"
 )
+
+func TestSpanColor(t *testing.T) {
+	light := toolkit.DefaultLight()
+	dark := toolkit.DefaultDark()
+	// Every kind resolves to an opaque colour in both palettes (covers each
+	// case + the dark/light branch inside).
+	for _, k := range []syntax.Kind{
+		syntax.Keyword, syntax.String, syntax.Comment, syntax.Number,
+		syntax.Type, syntax.Func, syntax.Plain, syntax.Punct,
+	} {
+		if c := spanColor(k, light); c.A != 0xFF {
+			t.Errorf("light kind %d not opaque: %+v", k, c)
+		}
+		if c := spanColor(k, dark); c.A != 0xFF {
+			t.Errorf("dark kind %d not opaque: %+v", k, c)
+		}
+	}
+	// Spot-check the light/dark keyword hues + the Plain→OnSurface fallback.
+	if got := spanColor(syntax.Keyword, light); got != rgb(0xA6, 0x26, 0xA4) {
+		t.Errorf("light keyword = %+v", got)
+	}
+	if got := spanColor(syntax.Keyword, dark); got != rgb(0xC6, 0x78, 0xDD) {
+		t.Errorf("dark keyword = %+v", got)
+	}
+	if got := spanColor(syntax.Plain, light); got != rgb(light.OnSurface.R, light.OnSurface.G, light.OnSurface.B) {
+		t.Errorf("plain = %+v, want OnSurface", got)
+	}
+}
 
 // TestNewStateFields verifies every state slot is populated so key
 // handlers never nil-deref at runtime.
@@ -714,7 +743,7 @@ func TestHSplitOnEventForwardsToLeft(t *testing.T) {
 func TestHSplitClickRoutesByHitTest(t *testing.T) {
 	fl := &fileList{items: []string{"a", "b", "c", "d"}, selected: 0}
 	tp := &textPreview{}
-	tp.setText("x\ny\nz")
+	tp.setText("x\ny\nz", "")
 	h := &hSplit{left: fl, right: tp, leftFrac: 30}
 	h.SetBounds(toolkit.Rect{X: 10, Y: 5, W: 100, H: 20})
 	// Local (2, 2) → left pane; fileList sees (2, 2), selects item 2.
@@ -751,7 +780,7 @@ func TestHSplitClickOnRightWithNilRight(t *testing.T) {
 // textPreview tests.
 func TestTextPreviewSetTextAndText(t *testing.T) {
 	tp := &textPreview{}
-	tp.setText("a\nb\nc")
+	tp.setText("a\nb\nc", "")
 	if len(tp.lines) != 3 {
 		t.Fatalf("lines = %v, want 3", tp.lines)
 	}
@@ -761,7 +790,7 @@ func TestTextPreviewSetTextAndText(t *testing.T) {
 }
 func TestTextPreviewSetEmptyClears(t *testing.T) {
 	tp := &textPreview{lines: []string{"a"}}
-	tp.setText("")
+	tp.setText("", "")
 	if tp.lines != nil {
 		t.Errorf("lines not nil after setText(\"\"): %v", tp.lines)
 	}
@@ -771,14 +800,14 @@ func TestTextPreviewSetEmptyClears(t *testing.T) {
 }
 func TestTextPreviewSetTextTrailingNewline(t *testing.T) {
 	tp := &textPreview{}
-	tp.setText("hello\n")
+	tp.setText("hello\n", "")
 	if len(tp.lines) != 1 || tp.lines[0] != "hello" {
 		t.Errorf("trailing newline handling wrong: %v", tp.lines)
 	}
 }
 func TestTextPreviewDrawRendersLinesAndClipsBounds(t *testing.T) {
 	tp := &textPreview{}
-	tp.setText("a\nb\nc\nd\ne")
+	tp.setText("a\nb\nc\nd\ne", "")
 	tp.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3}) // only 3 rows fit
 	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
 	tp.Draw(pnt, toolkit.DefaultLight())

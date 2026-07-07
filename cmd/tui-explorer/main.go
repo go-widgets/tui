@@ -30,10 +30,12 @@ import (
 	"flag"
 	"io"
 	"os"
+	"unicode/utf8"
 
 	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
+	"github.com/go-widgets/tui/syntax"
 )
 
 // runFunc / osExit / newAppFunc are dependency-injection seams so
@@ -330,7 +332,7 @@ func newState() *state {
 
 	fl := &fileList{items: paths, selected: 0}
 	content := &textPreview{}
-	content.setText(files[paths[0]])
+	content.setText(files[paths[0]], paths[0])
 
 	body := &hSplit{left: fl, right: content, leftFrac: 30}
 
@@ -443,10 +445,10 @@ func newState() *state {
 // selected fileList index.
 func (s *state) syncContent() {
 	if s.fileList.selected < 0 || s.fileList.selected >= len(s.paths) {
-		s.content.setText("(no selection)")
+		s.content.setText("(no selection)", "")
 		return
 	}
-	s.content.setText(s.files[s.paths[s.fileList.selected]])
+	s.content.setText(s.files[s.paths[s.fileList.selected]], s.paths[s.fileList.selected])
 }
 
 // textPreview is a cell-native read-only text view: 1 line per cell
@@ -456,6 +458,7 @@ func (s *state) syncContent() {
 type textPreview struct {
 	toolkit.Base
 	lines []string
+	spans [][]syntax.Span // per-line syntax-highlighted spans (see setText)
 }
 
 // Text returns the current buffer as a single string (lines joined
@@ -480,12 +483,14 @@ func (t *textPreview) Text() string {
 	return string(buf)
 }
 
-func (t *textPreview) setText(s string) {
+func (t *textPreview) setText(s, filename string) {
 	if s == "" {
 		t.lines = nil
+		t.spans = nil
 		return
 	}
 	t.lines = splitLines(s)
+	t.spans = syntax.Highlight(s, filename)
 }
 
 // splitLines splits s on '\n', dropping the trailing empty element
@@ -511,14 +516,60 @@ func (t *textPreview) Draw(p painter.Painter, theme *toolkit.Theme) {
 	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
 		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
 	})
-	for i, line := range t.lines {
+	for i, line := range t.spans {
 		y := r.Y + i
 		if y >= r.Y+r.H {
 			break
 		}
-		toolkit.DrawText(p, r.X+1, y, line, toolkit.RGBA{
-			R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A,
-		})
+		x := r.X + 1
+		for _, sp := range line {
+			toolkit.DrawText(p, x, y, sp.Text, spanColor(sp.Kind, theme))
+			x += utf8.RuneCountInString(sp.Text) // 1 cell per rune
+		}
+	}
+}
+
+// rgb builds an opaque RGBA.
+func rgb(r, g, b uint8) toolkit.RGBA { return toolkit.RGBA{R: r, G: g, B: b, A: 0xFF} }
+
+// spanColor maps a syntax Kind to a terminal ink, picking a dark- or
+// light-appropriate palette from the theme (a One Dark / One Light-ish scheme).
+// Plain + Punct stay in the theme foreground.
+func spanColor(k syntax.Kind, theme *toolkit.Theme) toolkit.RGBA {
+	dark := theme.Background.R < 0x80
+	switch k {
+	case syntax.Keyword:
+		if dark {
+			return rgb(0xC6, 0x78, 0xDD)
+		}
+		return rgb(0xA6, 0x26, 0xA4)
+	case syntax.String:
+		if dark {
+			return rgb(0x98, 0xC3, 0x79)
+		}
+		return rgb(0x50, 0xA1, 0x4F)
+	case syntax.Comment:
+		if dark {
+			return rgb(0x7F, 0x84, 0x8E)
+		}
+		return rgb(0xA0, 0xA1, 0xA7)
+	case syntax.Number:
+		if dark {
+			return rgb(0xD1, 0x9A, 0x66)
+		}
+		return rgb(0x98, 0x68, 0x01)
+	case syntax.Type:
+		if dark {
+			return rgb(0x56, 0xB6, 0xC2)
+		}
+		return rgb(0x01, 0x84, 0xBC)
+	case syntax.Func:
+		if dark {
+			return rgb(0x61, 0xAF, 0xEF)
+		}
+		return rgb(0x40, 0x78, 0xF2)
+	default: // Plain, Punct
+		return rgb(theme.OnSurface.R, theme.OnSurface.G, theme.OnSurface.B)
 	}
 }
 
