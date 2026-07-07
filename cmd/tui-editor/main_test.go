@@ -758,6 +758,88 @@ func TestNewStateViewToggleLineNumbers(t *testing.T) {
 	}
 }
 
+// TestNewStateEditUndoRedoActionsRouteThroughTextEditor covers the
+// Edit → Undo / Redo closures that call tv.OnEvent with Ctrl+Z/Y.
+func TestNewStateEditUndoRedoActionsRouteThroughTextEditor(t *testing.T) {
+	s := newState()
+	// Prime an editable state — insert a char so the undo stack has
+	// something to pop back. The TextEditor exposes no direct
+	// Undo()/Redo() method (v0.10.x); the menu wiring dispatches via
+	// EventKeyDown so keyboard + menu share the same code path.
+	s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
+	if s.tv.CursorCol != 1 {
+		t.Fatalf("insert setup: CursorCol = %d, want 1", s.tv.CursorCol)
+	}
+	// Edit → Undo (row 0) must fire.
+	s.editDropdown.ItemActions[0]()
+	if s.tv.CursorCol != 0 {
+		t.Errorf("Undo did not roll back cursor: col = %d, want 0", s.tv.CursorCol)
+	}
+	// Edit → Redo (row 1) must restore.
+	s.editDropdown.ItemActions[1]()
+	if s.tv.CursorCol != 1 {
+		t.Errorf("Redo did not restore cursor: col = %d, want 1", s.tv.CursorCol)
+	}
+	// Stub rows 2..4 are nil.
+	for i := 2; i < 5; i++ {
+		if s.editDropdown.ItemActions[i] != nil {
+			t.Errorf("edit row %d expected nil (stub), got action", i)
+		}
+	}
+}
+
+// TestNewStateFileSaveActionCallsSaveSeam wires File → Save row 2 to
+// s.save(), which itself delegates to s.writeFile. Confirm the seam
+// fires by injecting a recording writeFile.
+func TestNewStateFileSaveActionCallsSaveSeam(t *testing.T) {
+	s := newState()
+	s.file = "/tmp/mock" // gives save() a target
+	called := false
+	s.writeFile = func(_ string, _ []byte, _ os.FileMode) error {
+		called = true
+		return nil
+	}
+	s.fileDropdown.ItemActions[2]()
+	if !called {
+		t.Error("File → Save row 2 did not call writeFile seam")
+	}
+	// Stub rows 0, 1 stay nil.
+	if s.fileDropdown.ItemActions[0] != nil || s.fileDropdown.ItemActions[1] != nil {
+		t.Error("New/Open expected nil")
+	}
+}
+
+// TestNewStateFileQuitActionCallsQuitSeam wires the late-bound quit
+// closure; before run() sets it, calling it must be a no-op (guarded
+// by `if s.quit != nil`).
+func TestNewStateFileQuitActionCallsQuitSeam(t *testing.T) {
+	s := newState()
+	// Row 3 (Quit) with s.quit unset must not panic.
+	s.fileDropdown.ItemActions[3]()
+	called := 0
+	s.quit = func() { called++ }
+	s.fileDropdown.ItemActions[3]()
+	if called != 1 {
+		t.Errorf("Quit action did not fire s.quit: called = %d", called)
+	}
+}
+
+// TestNewStateViewCommandPaletteActionSwitchesMode covers the
+// View → Command palette closure calling setMode(modePalette).
+func TestNewStateViewCommandPaletteActionSwitchesMode(t *testing.T) {
+	s := newState()
+	if s.mode != modeView {
+		t.Fatalf("start mode = %v, want modeView", s.mode)
+	}
+	s.viewDropdown.ItemActions[2]()
+	if s.mode != modePalette {
+		t.Errorf("View → Command palette: mode = %v, want modePalette", s.mode)
+	}
+	if !s.palette.Visible {
+		t.Error("palette not marked visible after menu action")
+	}
+}
+
 // -----------------------------------------------------------------
 // menuDropdown (tui-editor local copy)
 // -----------------------------------------------------------------

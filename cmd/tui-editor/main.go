@@ -102,6 +102,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	for k, h := range st.keys() {
 		app.Keys[k] = h
 	}
+	// Late-bind the File → Quit menu action now that the App exists.
+	st.quit = app.Quit
 	return runAppFunc(app)
 }
 
@@ -136,6 +138,12 @@ type state struct {
 	// filesystem.
 	readFile  func(string) ([]byte, error)
 	writeFile func(string, []byte, os.FileMode) error
+
+	// quit is a late-bound closure the "File → Quit" menu item calls.
+	// newState() leaves it as a no-op; run() overwrites it with
+	// app.Quit once the App is created (a menu item created before
+	// the App exists can't hold a direct app reference).
+	quit func()
 }
 
 // menuItem + menuBar mirror the tui-explorer helpers. Kept as a local
@@ -213,27 +221,52 @@ func newState() *state {
 		Body:  []string{}, // populated when the user types via paletteEn
 	}
 
+	// Forward-declared so state's `quit` closure can be captured
+	// inside the fileDropdown before newState() returns.
+	s := &state{}
+
 	fileDropdown := &menuDropdown{
 		Title:   "File",
 		Body:    []string{"New       (stub)", "Open      (stub)", "Save      Ctrl+S", "Quit      q"},
 		AnchorY: 1,
+	}
+	fileDropdown.ItemActions = []func(){
+		nil, // New — stub
+		nil, // Open — stub
+		func() { _ = s.save() },
+		func() {
+			if s.quit != nil {
+				s.quit()
+			}
+		},
 	}
 	editDropdown := &menuDropdown{
 		Title:   "Edit",
 		Body:    []string{"Undo   Ctrl+Z", "Redo   Ctrl+Y", "Cut    (stub)", "Copy   (stub)", "Paste  (stub)"},
 		AnchorY: 1,
 	}
+	editDropdown.ItemActions = []func(){
+		func() {
+			tv.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Z"})
+			s.refreshStatus()
+		},
+		func() {
+			tv.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Y"})
+			s.refreshStatus()
+		},
+		nil, // Cut — stub
+		nil, // Copy — stub
+		nil, // Paste — stub
+	}
 	viewDropdown := &menuDropdown{
 		Title:   "View",
 		Body:    []string{"Toggle line numbers", "Focus editor         i", "Command palette      Ctrl+P"},
 		AnchorY: 1,
 	}
-	// Row 0 flips the TextEditor gutter. Rows 1 and 2 are
-	// informational — the shortcut already toggles the state.
 	viewDropdown.ItemActions = []func(){
 		func() { tv.ShowGutter = !tv.ShowGutter },
-		nil,
-		nil,
+		nil, // Focus editor — informational, `i` key already does it
+		func() { s.setMode(modePalette) },
 	}
 	helpDropdown := &menuDropdown{
 		Title: "Help",
@@ -294,7 +327,8 @@ func newState() *state {
 		overlays: []toolkit.Widget{palette, fileDropdown, editDropdown, viewDropdown, helpDropdown},
 	}
 
-	return &state{
+	// Populate the forward-declared state now that everything's wired.
+	*s = state{
 		mode:         modeView,
 		tv:           tv,
 		statusbar:    statusbar,
@@ -309,6 +343,7 @@ func newState() *state {
 		readFile:     os.ReadFile,
 		writeFile:    os.WriteFile,
 	}
+	return s
 }
 
 // cellPopover — cell-native modal, same shape as

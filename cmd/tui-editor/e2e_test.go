@@ -249,6 +249,75 @@ func TestEditorViewMenuTogglesLineNumbers(t *testing.T) {
 	}
 }
 
+// TestEditorEditMenuUndoRestoresBuffer — full pty flow: enter edit
+// mode via `i`, type "abc", press Escape to exit edit mode, then
+// click Edit → Undo. The buffer must roll back one step.
+func TestEditorEditMenuUndoRestoresBuffer(t *testing.T) {
+	bin := buildBinary(t)
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, ptmx); close(done) }()
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("i"))    // insert mode
+		time.Sleep(150 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("abc"))  // three chars
+		time.Sleep(150 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("\x1b")) // Escape back to VIEW
+		time.Sleep(200 * time.Millisecond)
+		// Menu bar: File Edit View Help. "Edit" starts at local X=8
+		// (pad=1, "File"=4, sep=3). Wire X=10 → local X=9 (in [8,12)).
+		_, _ = ptmx.Write([]byte("\x1b[<0;10;1M")) // click Edit
+		time.Sleep(250 * time.Millisecond)
+		// Edit dropdown anchors at (X=8, Y=1). Title is dropdown-local
+		// Y=0, body row 0 is dropdown-local Y=1. Decoded Y = wire Y - 1,
+		// dropdown-local Y = decoded Y - AnchorY. Wire Y=3 →
+		// decoded 2 → dropdown-local 1 → idx=0 → Undo.
+		_, _ = ptmx.Write([]byte("\x1b[<0;12;3M"))
+		time.Sleep(300 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("q"))
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("binary did not exit within timeout")
+	}
+	_ = c.Wait()
+
+	// Decode the final frame (last "\x1b[H" cursor-home marker) and
+	// assert the buffer shows "ab" not "abc" after the menu-driven
+	// Undo. Status-bar cursor position stays stale because upstream
+	// doesn't call refreshStatus after Ctrl+Z — that's an upstream
+	// gap not fixed here.
+	raw := buf.Bytes()
+	idx := bytes.LastIndex(raw, []byte("\x1b[H"))
+	if idx >= 0 {
+		raw = raw[idx:]
+	}
+	g := tui.DecodeANSI(raw, 80, 30)
+	// tui.TextEditor gutter: col 0 = pad, col 1 = digit "1", col 2 =
+	// pad, col 3 = first buffer char, col 4 = second, col 5 = third.
+	// Before Undo: col 3 = 'a', col 4 = 'b', col 5 = 'c'.
+	// After Undo: col 3 = 'a', col 4 = 'b', col 5 = blank (' ').
+	if r := g.At(3, 1).Rune; r != 'a' {
+		t.Errorf("col 3 row 1 = %c, want 'a'", r)
+	}
+	if r := g.At(4, 1).Rune; r != 'b' {
+		t.Errorf("col 4 row 1 = %c, want 'b'", r)
+	}
+	if r := g.At(5, 1).Rune; r == 'c' {
+		t.Errorf("col 5 row 1 still 'c' — Undo via menu did not fire")
+	}
+}
+
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
 func stripANSI(b []byte) string { return ansiRE.ReplaceAllString(string(b), "") }
