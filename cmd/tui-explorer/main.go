@@ -30,6 +30,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/go-widgets/painter"
@@ -516,12 +517,17 @@ func (t *textPreview) Draw(p painter.Painter, theme *toolkit.Theme) {
 	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
 		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
 	})
+	gutter := tui.GutterWidth(len(t.spans))
+	numInk := tui.LineNumberInk(theme)
 	for i, line := range t.spans {
 		y := r.Y + i
 		if y >= r.Y+r.H {
 			break
 		}
-		x := r.X + 1
+		// Right-aligned line number in the gutter, then the code.
+		num := strconv.Itoa(i + 1)
+		toolkit.DrawText(p, r.X+gutter-1-len(num), y, num, numInk)
+		x := r.X + gutter
 		for _, sp := range line {
 			toolkit.DrawText(p, x, y, sp.Text, tui.SyntaxInk(sp.Kind, theme))
 			x += utf8.RuneCountInString(sp.Text) // 1 cell per rune
