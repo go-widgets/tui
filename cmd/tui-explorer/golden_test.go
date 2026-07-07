@@ -16,7 +16,7 @@
 // v0.3.0 through v0.3.6 patches all shipped despite passing every
 // prior test.
 //
-// UPDATE-GOLDEN=1 go test -tags integration -run TestExplorerGolden ./cmd/tui-explorer/
+// UPDATE_GOLDEN=1 go test -tags integration -run TestExplorerGolden ./cmd/tui-explorer/
 //   → regenerates the golden files. Review the diff, commit if OK.
 
 package main
