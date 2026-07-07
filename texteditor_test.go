@@ -259,6 +259,56 @@ func TestTextEditorUndoHistoryCap(t *testing.T) {
 	}
 }
 
+func TestTextEditorFind(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("alpha bravo\ncharlie\nalpha delta")
+	// Empty query is a no-op.
+	if e.Find("") {
+		t.Error("Find(\"\") should return false")
+	}
+	// First match is at (0,0).
+	if !e.Find("alpha") || e.CursorLine != 0 || e.CursorCol != 0 {
+		t.Fatalf("Find alpha #1 = (%d,%d)", e.CursorLine, e.CursorCol)
+	}
+	// FindNext walks to the second "alpha" on line 2.
+	if !e.FindNext() || e.CursorLine != 2 || e.CursorCol != 0 {
+		t.Fatalf("FindNext = (%d,%d), want (2,0)", e.CursorLine, e.CursorCol)
+	}
+	// FindNext again wraps back to the first "alpha" (k==len re-check of the
+	// start line from column 0).
+	if !e.FindNext() || e.CursorLine != 0 || e.CursorCol != 0 {
+		t.Fatalf("FindNext wrap = (%d,%d), want (0,0)", e.CursorLine, e.CursorCol)
+	}
+	// A match later on the current line (bravo at col 6).
+	e.CursorLine, e.CursorCol = 0, 0
+	if !e.Find("bravo") || e.CursorLine != 0 || e.CursorCol != 6 {
+		t.Fatalf("Find bravo = (%d,%d), want (0,6)", e.CursorLine, e.CursorCol)
+	}
+	// No match leaves the caret where it was and returns false.
+	e.CursorLine, e.CursorCol = 1, 0
+	if e.Find("zzz") {
+		t.Error("Find zzz should return false")
+	}
+	// FindNext with no prior successful query (fresh editor) is a no-op.
+	fresh := NewTextEditor()
+	if fresh.FindNext() {
+		t.Error("FindNext with no query should return false")
+	}
+	// Find on an empty buffer returns false (searchForward n==0 guard via
+	// a cleared buffer).
+	empty := &TextEditor{}
+	if empty.Find("x") {
+		t.Error("Find on empty buffer should return false")
+	}
+	// FindNext when the caret sits past the end of its line: the k==0 line is
+	// skipped and the search resumes on the next line.
+	e.SetText("ab\nfindme")
+	e.CursorLine, e.CursorCol = 0, 99 // past EOL of line 0
+	if !e.Find("findme") || e.CursorLine != 1 || e.CursorCol != 0 {
+		t.Fatalf("Find past-EOL = (%d,%d), want (1,0)", e.CursorLine, e.CursorCol)
+	}
+}
+
 func TestTextEditorReadOnly(t *testing.T) {
 	e := NewTextEditor()
 	e.SetText("abc")

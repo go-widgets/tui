@@ -6,6 +6,7 @@ package tui
 
 import (
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-widgets/painter"
@@ -38,6 +39,58 @@ type TextEditor struct {
 
 	spans      [][]syntax.Span
 	undo, redo []teSnapshot
+	lastQuery  string // remembered by Find for FindNext
+}
+
+// Find moves the caret to the next occurrence of query at or after the current
+// caret, searching forward and wrapping to the top; it returns whether a match
+// was found. An empty query is a no-op. The query is remembered for FindNext.
+func (t *TextEditor) Find(query string) bool {
+	t.lastQuery = query
+	if query == "" {
+		return false
+	}
+	return t.searchForward(t.CursorLine, t.CursorCol, query)
+}
+
+// FindNext repeats the last Find starting just past the caret, so successive
+// calls walk consecutive matches (wrapping). No-op with no prior Find.
+func (t *TextEditor) FindNext() bool {
+	if t.lastQuery == "" {
+		return false
+	}
+	return t.searchForward(t.CursorLine, t.CursorCol+1, t.lastQuery)
+}
+
+// searchForward scans lines from (startLine, startCol) forward, wrapping once
+// through the whole buffer (the k==len pass re-checks the start line from its
+// beginning so a match before startCol is still found). On a hit it moves the
+// caret to the match start and returns true.
+func (t *TextEditor) searchForward(startLine, startCol int, query string) bool {
+	n := len(t.Lines)
+	if n == 0 {
+		return false
+	}
+	for k := 0; k <= n; k++ {
+		li := (startLine + k) % n
+		line := t.Lines[li]
+		from := 0
+		if k == 0 {
+			// startCol comes from the caret (Find) or caret+1 (FindNext), so
+			// it is never negative; a value past the line end skips this line's
+			// first pass and the search resumes on the next line.
+			from = startCol
+			if from > len(line) {
+				continue
+			}
+		}
+		if idx := strings.Index(line[from:], query); idx >= 0 {
+			t.CursorLine = li
+			t.CursorCol = from + idx
+			return true
+		}
+	}
+	return false
 }
 
 // maxUndo caps the undo history so a long editing session can't grow the

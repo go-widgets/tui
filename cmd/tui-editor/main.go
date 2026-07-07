@@ -624,11 +624,14 @@ func (s *state) save() error {
 // commands: "save" (calls s.save), "quit" (calls a.Quit). Unknown
 // commands are ignored. Returns an error only when save fails.
 func (s *state) runCommand(a *tui.App, cmd string) error {
-	switch strings.TrimSpace(cmd) {
-	case "save":
+	cmd = strings.TrimSpace(cmd)
+	switch {
+	case cmd == "save":
 		return s.save()
-	case "quit", "q":
+	case cmd == "quit", cmd == "q":
 		a.Quit()
+	case strings.HasPrefix(cmd, "find "):
+		s.tv.Find(strings.TrimSpace(strings.TrimPrefix(cmd, "find ")))
 	}
 	return nil
 }
