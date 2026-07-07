@@ -647,6 +647,28 @@ func TestMenuBarItemXRange(t *testing.T) {
 	}
 }
 
+func TestCellTextEditDrawHighlighted(t *testing.T) {
+	mk := func(w, h int) *painter.PixelPainter { return painter.NewPixelPainter(make([]byte, w*h*4), w, h) }
+	tv := &cellTextEdit{Focused: true, Filename: "x.go"}
+	tv.SetText("package main\nfunc f() {}\nvar x = 42")
+	tv.CursorLine, tv.CursorCol = 1, 3
+	// H (2) < line count (3) exercises the row-overflow break; the visible
+	// rows exercise the coloured span loop in both palettes.
+	tv.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 2})
+	tv.Draw(mk(40, 2), toolkit.DefaultLight())
+	tv.Draw(mk(40, 2), toolkit.DefaultDark())
+	// Cursor past the visible width: the caret-draw inner guard is false.
+	tv.CursorCol = 100
+	tv.Draw(mk(40, 2), toolkit.DefaultLight())
+	// Cursor row out of view: the caret-draw outer guard is false.
+	tv.CursorLine, tv.CursorCol = 5, 0
+	tv.Draw(mk(40, 2), toolkit.DefaultLight())
+	// Not focused: no caret at all.
+	tv.Focused = false
+	tv.CursorLine = 0
+	tv.Draw(mk(40, 2), toolkit.DefaultLight())
+}
+
 func TestMenuBarDrawRendersItems(t *testing.T) {
 	mb := &menuBar{Items: []menuItem{{Label: "X"}}}
 	mb.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 1})

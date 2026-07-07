@@ -41,10 +41,12 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
+	"github.com/go-widgets/tui/syntax"
 )
 
 // runFunc / osExit / newAppFunc / runAppFunc are dependency-injection
@@ -81,6 +83,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	st := newState()
 	st.file = *filePath
+	st.tv.Filename = *filePath // drives syntax highlighting of the buffer
 	if *filePath != "" {
 		body, err := st.readFile(*filePath)
 		if err != nil {
@@ -314,6 +317,15 @@ type cellTextEdit struct {
 	CursorLine int
 	CursorCol  int
 	Focused    bool
+	Filename   string          // drives the syntax language; "" == plain
+	spans      [][]syntax.Span // per-line highlight, recomputed on every change
+}
+
+// rehighlight recomputes the per-line syntax spans from the current buffer +
+// filename. Called after any mutation (SetText / OnEvent) so the colouring
+// tracks live edits.
+func (t *cellTextEdit) rehighlight() {
+	t.spans = syntax.Highlight(t.Text(), t.Filename)
 }
 
 func (t *cellTextEdit) Text() string {
@@ -351,6 +363,7 @@ func (t *cellTextEdit) SetText(s string) {
 	}
 	t.CursorLine = 0
 	t.CursorCol = 0
+	t.rehighlight()
 }
 
 func (t *cellTextEdit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
@@ -360,13 +373,16 @@ func (t *cellTextEdit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
 		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
 	})
-	ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
-	for i, line := range t.Lines {
+	for i, line := range t.spans {
 		y := r.Y + i
 		if y >= r.Y+r.H {
 			break
 		}
-		toolkit.DrawText(pnt, r.X+1, y, line, ink)
+		x := r.X + 1
+		for _, sp := range line {
+			toolkit.DrawText(pnt, x, y, sp.Text, tui.SyntaxInk(sp.Kind, theme))
+			x += utf8.RuneCountInString(sp.Text) // 1 cell per rune
+		}
 	}
 	// Cursor: reverse-video single cell at the caret position.
 	if t.Focused && t.CursorLine >= 0 && t.CursorLine < r.H {
@@ -460,6 +476,7 @@ func (t *cellTextEdit) OnEvent(ev toolkit.Event) {
 		}
 		t.CursorCol = x
 	}
+	t.rehighlight()
 }
 
 // cellPopover — cell-native modal, same shape as

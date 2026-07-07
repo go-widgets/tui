@@ -523,53 +523,9 @@ func (t *textPreview) Draw(p painter.Painter, theme *toolkit.Theme) {
 		}
 		x := r.X + 1
 		for _, sp := range line {
-			toolkit.DrawText(p, x, y, sp.Text, spanColor(sp.Kind, theme))
+			toolkit.DrawText(p, x, y, sp.Text, tui.SyntaxInk(sp.Kind, theme))
 			x += utf8.RuneCountInString(sp.Text) // 1 cell per rune
 		}
-	}
-}
-
-// rgb builds an opaque RGBA.
-func rgb(r, g, b uint8) toolkit.RGBA { return toolkit.RGBA{R: r, G: g, B: b, A: 0xFF} }
-
-// spanColor maps a syntax Kind to a terminal ink, picking a dark- or
-// light-appropriate palette from the theme (a One Dark / One Light-ish scheme).
-// Plain + Punct stay in the theme foreground.
-func spanColor(k syntax.Kind, theme *toolkit.Theme) toolkit.RGBA {
-	dark := theme.Background.R < 0x80
-	switch k {
-	case syntax.Keyword:
-		if dark {
-			return rgb(0xC6, 0x78, 0xDD)
-		}
-		return rgb(0xA6, 0x26, 0xA4)
-	case syntax.String:
-		if dark {
-			return rgb(0x98, 0xC3, 0x79)
-		}
-		return rgb(0x50, 0xA1, 0x4F)
-	case syntax.Comment:
-		if dark {
-			return rgb(0x7F, 0x84, 0x8E)
-		}
-		return rgb(0xA0, 0xA1, 0xA7)
-	case syntax.Number:
-		if dark {
-			return rgb(0xD1, 0x9A, 0x66)
-		}
-		return rgb(0x98, 0x68, 0x01)
-	case syntax.Type:
-		if dark {
-			return rgb(0x56, 0xB6, 0xC2)
-		}
-		return rgb(0x01, 0x84, 0xBC)
-	case syntax.Func:
-		if dark {
-			return rgb(0x61, 0xAF, 0xEF)
-		}
-		return rgb(0x40, 0x78, 0xF2)
-	default: // Plain, Punct
-		return rgb(theme.OnSurface.R, theme.OnSurface.G, theme.OnSurface.B)
 	}
 }
 

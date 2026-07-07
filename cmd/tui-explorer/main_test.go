@@ -17,36 +17,7 @@ import (
 	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
-	"github.com/go-widgets/tui/syntax"
 )
-
-func TestSpanColor(t *testing.T) {
-	light := toolkit.DefaultLight()
-	dark := toolkit.DefaultDark()
-	// Every kind resolves to an opaque colour in both palettes (covers each
-	// case + the dark/light branch inside).
-	for _, k := range []syntax.Kind{
-		syntax.Keyword, syntax.String, syntax.Comment, syntax.Number,
-		syntax.Type, syntax.Func, syntax.Plain, syntax.Punct,
-	} {
-		if c := spanColor(k, light); c.A != 0xFF {
-			t.Errorf("light kind %d not opaque: %+v", k, c)
-		}
-		if c := spanColor(k, dark); c.A != 0xFF {
-			t.Errorf("dark kind %d not opaque: %+v", k, c)
-		}
-	}
-	// Spot-check the light/dark keyword hues + the Plain→OnSurface fallback.
-	if got := spanColor(syntax.Keyword, light); got != rgb(0xA6, 0x26, 0xA4) {
-		t.Errorf("light keyword = %+v", got)
-	}
-	if got := spanColor(syntax.Keyword, dark); got != rgb(0xC6, 0x78, 0xDD) {
-		t.Errorf("dark keyword = %+v", got)
-	}
-	if got := spanColor(syntax.Plain, light); got != rgb(light.OnSurface.R, light.OnSurface.G, light.OnSurface.B) {
-		t.Errorf("plain = %+v, want OnSurface", got)
-	}
-}
 
 // TestNewStateFields verifies every state slot is populated so key
 // handlers never nil-deref at runtime.
