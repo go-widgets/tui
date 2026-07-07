@@ -246,9 +246,27 @@ func decodeMouseSGR(payload []byte, final byte) (toolkit.Event, bool) {
 	if field != 2 {
 		return toolkit.Event{}, false
 	}
-	// bit 0x40 = scroll wheel; low bits != 0 = middle/right button.
-	// Either flavour is a non-left mouse event, silently consumed.
-	if cb&0x40 != 0 || cb&0x03 != 0 {
+	// Scroll wheel: bit 0x40 set. The low bits encode direction —
+	// 0 = up, 1 = down, 2/3 = horizontal (ignored). Map vertical
+	// wheel presses to EventKeyDown Up/Down so widgets that already
+	// handle arrow-key nav (fileList, cellTextEdit) respond to the
+	// wheel without needing to know it exists. Terminals emit these
+	// only on 'M' (no release phase for wheels), so an 'm' here is
+	// a stray release the terminal shouldn't be sending — consume it.
+	if cb&0x40 != 0 {
+		if final != 'M' {
+			return toolkit.Event{}, false
+		}
+		switch cb {
+		case 64:
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"}, true
+		case 65:
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"}, true
+		}
+		return toolkit.Event{}, false
+	}
+	// low bits != 0 = middle/right button — silently consumed.
+	if cb&0x03 != 0 {
 		return toolkit.Event{}, false
 	}
 	// SGR coords are 1-indexed; the toolkit convention is 0-indexed.

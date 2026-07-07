@@ -413,6 +413,41 @@ func sgrMouseDrag(col, row int) []byte {
 	return []byte("\x1b[<32;" + itoa(col) + ";" + itoa(row) + "M")
 }
 
+// sgrWheelDown returns the SGR wheel-down sequence (Cb = 65).
+func sgrWheelDown(col, row int) []byte {
+	return []byte("\x1b[<65;" + itoa(col) + ";" + itoa(row) + "M")
+}
+
+// TestExplorerScrollWheelMovesFileSelection — a wheel-down tick maps
+// to EventKeyDown "Down" which the App's Keys map wires to fileList
+// advance. Two ticks → selected index moves from 0 to 2 → row 3
+// (0-indexed 2) shows README.md.
+func TestExplorerScrollWheelMovesFileSelection(t *testing.T) {
+	keys := [][]byte{
+		sgrWheelDown(5, 3),
+		sgrWheelDown(5, 3),
+		[]byte("q"),
+	}
+	g := captureFrameWithBytes(t, 80, 30, keys, 5*time.Second)
+	if !strings.Contains(g.RowText(3), "/docs/README.md") {
+		t.Errorf("row 3 = %q, want '/docs/README.md' after 2× wheel down", g.RowText(3))
+	}
+	c := g.At(3, 3)
+	if !c.Bg.Set || c.Bg.R != lightAccentR {
+		t.Errorf("row 3 highlight not applied after wheel scrolls. cell=%+v", c)
+	}
+	found := false
+	for y := 0; y < g.Rows; y++ {
+		if strings.Contains(g.RowText(y), "# Project") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("right pane never showed '# Project' after wheel-down — syncContent didn't fire on wheel")
+	}
+}
+
 // TestExplorerGripDragSurvivesCrossingIntoHeaderBand — starts a grip
 // drag in the body band, then continues the drag WITH THE MOUSE
 // STRAYING INTO THE HEADER ROW. Without packedVBox drag capture, the

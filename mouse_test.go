@@ -77,12 +77,49 @@ func TestMouseSGRLeftMotionEmitsDrag(t *testing.T) {
 	}
 }
 
-func TestMouseSGRScrollWheelIsConsumed(t *testing.T) {
-	// bit 0x40 set = scroll wheel.
+func TestMouseSGRScrollWheelUpEmitsUpKey(t *testing.T) {
+	// Cb = 64 (0x40) = wheel up, no button held. Maps to Up key.
 	p := NewInputParser()
 	got := p.Feed([]byte("\x1b[<64;5;5M"))
+	if len(got) != 1 {
+		t.Fatalf("wheel up must emit 1 event, got %+v", got)
+	}
+	want := toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Up"}
+	if got[0] != want {
+		t.Fatalf("wheel up event = %+v, want %+v", got[0], want)
+	}
+}
+
+func TestMouseSGRScrollWheelDownEmitsDownKey(t *testing.T) {
+	p := NewInputParser()
+	got := p.Feed([]byte("\x1b[<65;5;5M"))
+	if len(got) != 1 {
+		t.Fatalf("wheel down must emit 1 event, got %+v", got)
+	}
+	want := toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"}
+	if got[0] != want {
+		t.Fatalf("wheel down event = %+v, want %+v", got[0], want)
+	}
+}
+
+func TestMouseSGRScrollWheelHorizontalIsConsumed(t *testing.T) {
+	// Cb 66/67 = horizontal wheel — ignored (no vertical mapping).
+	p := NewInputParser()
+	for _, cb := range []string{"66", "67"} {
+		got := p.Feed([]byte("\x1b[<" + cb + ";5;5M"))
+		if len(got) != 0 {
+			t.Errorf("wheel Cb=%s emitted event: %+v", cb, got)
+		}
+	}
+}
+
+func TestMouseSGRScrollWheelReleaseIsConsumed(t *testing.T) {
+	// Wheel 'm' (release form) — terminals don't normally emit this
+	// but the parser must consume it silently rather than emit noise.
+	p := NewInputParser()
+	got := p.Feed([]byte("\x1b[<64;5;5m"))
 	if len(got) != 0 {
-		t.Fatalf("scroll must not emit an event, got %+v", got)
+		t.Errorf("wheel release emitted event: %+v", got)
 	}
 }
 
