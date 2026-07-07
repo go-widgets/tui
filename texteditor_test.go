@@ -189,6 +189,76 @@ func TestTextEditorClick(t *testing.T) {
 	}
 }
 
+func TestTextEditorUndoRedo(t *testing.T) {
+	e := NewTextEditor()
+	e.OnEvent(char("a"))
+	e.OnEvent(char("b")) // "ab"
+	e.OnEvent(key("Enter"))
+	e.OnEvent(char("c")) // "ab\nc"
+	if e.Text() != "ab\nc" {
+		t.Fatalf("setup = %q", e.Text())
+	}
+	// Undo the 'c', then the Enter, then 'b', then 'a'.
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "ab\n" {
+		t.Fatalf("undo c = %q, want %q", e.Text(), "ab\n")
+	}
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "ab" {
+		t.Fatalf("undo Enter = %q, want %q", e.Text(), "ab")
+	}
+	// Redo the Enter back.
+	e.OnEvent(key("Ctrl+Y"))
+	if e.Text() != "ab\n" {
+		t.Fatalf("redo Enter = %q, want %q", e.Text(), "ab\n")
+	}
+	// A fresh edit clears the redo branch.
+	e.OnEvent(char("Z"))
+	e.OnEvent(key("Ctrl+Y")) // nothing to redo now
+	if e.Text() != "ab\nZ" {
+		t.Fatalf("redo after new edit should be a no-op: %q", e.Text())
+	}
+	// Undo restores the caret too.
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "ab\n" || e.CursorLine != 1 || e.CursorCol != 0 {
+		t.Fatalf("undo cursor = (%d,%d) text %q", e.CursorLine, e.CursorCol, e.Text())
+	}
+}
+
+func TestTextEditorUndoRedoEmptyAndReadOnly(t *testing.T) {
+	e := NewTextEditor()
+	// Nothing to undo/redo yet -> no-ops.
+	e.OnEvent(key("Ctrl+Z"))
+	e.OnEvent(key("Ctrl+Y"))
+	if e.Text() != "" {
+		t.Fatalf("empty-history undo/redo mutated: %q", e.Text())
+	}
+	// ReadOnly ignores undo/redo (and never records history).
+	e.SetText("abc")
+	e.ReadOnly = true
+	e.OnEvent(key("Ctrl+Z"))
+	e.OnEvent(key("Ctrl+Y"))
+	if e.Text() != "abc" {
+		t.Fatalf("ReadOnly undo/redo mutated: %q", e.Text())
+	}
+}
+
+func TestTextEditorUndoHistoryCap(t *testing.T) {
+	e := NewTextEditor()
+	for i := 0; i < maxUndo+50; i++ {
+		e.OnEvent(char("x"))
+	}
+	if len(e.undo) != maxUndo {
+		t.Fatalf("undo stack = %d, want capped at %d", len(e.undo), maxUndo)
+	}
+	// Undo still works after the cap.
+	before := e.Text()
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() == before {
+		t.Error("undo after cap did nothing")
+	}
+}
+
 func TestTextEditorReadOnly(t *testing.T) {
 	e := NewTextEditor()
 	e.SetText("abc")

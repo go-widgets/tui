@@ -220,7 +220,7 @@ func newState() *state {
 	}
 	editDropdown := &menuDropdown{
 		Title:   "Edit",
-		Body:    []string{"Undo   (stub)", "Redo   (stub)", "Cut    (stub)", "Copy   (stub)", "Paste  (stub)"},
+		Body:    []string{"Undo   Ctrl+Z", "Redo   Ctrl+Y", "Cut    (stub)", "Copy   (stub)", "Paste  (stub)"},
 		AnchorY: 1,
 	}
 	viewDropdown := &menuDropdown{
@@ -233,6 +233,7 @@ func newState() *state {
 		Body: []string{
 			"i           Insert mode",
 			"Esc         View mode",
+			"Ctrl+Z/Y    Undo / Redo",
 			"Ctrl+P      Palette",
 			"Ctrl+S      Save",
 			"q           Quit (view)",
