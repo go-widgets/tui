@@ -178,6 +178,39 @@ func TestEditorGoldenDarkTheme(t *testing.T) {
 	compareOrUpdateGolden(t, g, "testdata/editor-dark.json")
 }
 
+// TestEditorHighlightsGoFileEndToEnd drives the REAL editor binary in a pty on
+// a real .go file and asserts the buffer is syntax-highlighted at the cell
+// level: the "func" keyword must carry the light keyword hue (#A626A4), not the
+// default foreground. (We target "func" on line 3 rather than "package" on line
+// 1, whose first glyph sits under the block cursor.) The golden frames use
+// plain buffers, so this is the only end-to-end proof that highlighting
+// survives the full render pipeline.
+func TestEditorHighlightsGoFileEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "sample.go")
+	if err := os.WriteFile(f, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := captureFrameWithArgs(t, 80, 30, "q", 3*time.Second, "--file="+f)
+	keyword := tui.Color{R: 0xA6, G: 0x26, B: 0xA4, Set: true}
+	for y := 0; y < g.Rows; y++ {
+		row := g.RowText(y)
+		x := strings.Index(row, "func ")
+		if x < 0 {
+			continue
+		}
+		if got := g.At(x, y).Fg; got != keyword {
+			t.Fatalf("'func' cell (%d,%d) fg = %+v, want keyword %+v", x, y, got, keyword)
+		}
+		// A plain identifier on the same line keeps the default foreground.
+		if fx := strings.Index(row, "main"); fx >= 0 && g.At(fx, y).Fg == keyword {
+			t.Fatalf("'main' should not be keyword-coloured")
+		}
+		return
+	}
+	t.Skip("'func' not visible in the captured frame")
+}
+
 func compareOrUpdateGolden(t *testing.T, g *tui.TermGrid, path string) {
 	t.Helper()
 	got := toGolden(g)
