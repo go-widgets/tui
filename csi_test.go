@@ -83,6 +83,8 @@ func TestFeedControlBytes(t *testing.T) {
 		{"BackspaceCtrlH", 0x08, "Backspace"},
 		{"CtrlC", 0x03, "Ctrl+C"},
 		{"CtrlD", 0x04, "Ctrl+D"},
+		{"CtrlP", 0x10, "Ctrl+P"},
+		{"CtrlS", 0x13, "Ctrl+S"},
 		{"CtrlY", 0x19, "Ctrl+Y"},
 		{"CtrlZ", 0x1A, "Ctrl+Z"},
 	}

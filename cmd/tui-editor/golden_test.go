@@ -231,6 +231,26 @@ func TestEditorUndoEndToEnd(t *testing.T) {
 	}
 }
 
+// TestEditorCtrlSSavesEndToEnd proves the Ctrl+S save works through the real
+// pty + parser: previously the parser dropped 0x13 so the save key was dead.
+// Open a file, enter edit mode, type 'Z' (dirtying the buffer), Ctrl+S, quit;
+// the file on disk must now contain the edit.
+func TestEditorCtrlSSavesEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "edit.txt")
+	if err := os.WriteFile(f, []byte("orig\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	captureFrameWithArgs(t, 80, 30, "iZ\x13\x1bq", 4*time.Second, "--file="+f)
+	got, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "Z") {
+		t.Fatalf("Ctrl+S did not save the edit; file on disk = %q", got)
+	}
+}
+
 func compareOrUpdateGolden(t *testing.T, g *tui.TermGrid, path string) {
 	t.Helper()
 	got := toGolden(g)
