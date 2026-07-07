@@ -200,6 +200,55 @@ func TestEditorClickOnFileMenuOpensAnchoredDropdown(t *testing.T) {
 	}
 }
 
+// TestEditorViewMenuTogglesLineNumbers — click "View" then click the
+// first body row ("Toggle line numbers") in its dropdown. Since the
+// editor starts with ShowGutter=true (tui.NewTextEditor default), the
+// action turns the gutter OFF — verified by inspecting cell (2, 1)
+// (which held a digit while the gutter was on) and asserting it's
+// now a text glyph or blank.
+func TestEditorViewMenuTogglesLineNumbers(t *testing.T) {
+	bin := buildBinary(t)
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, ptmx); close(done) }()
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		// "View" is menu item 2. Layout: pad=1, item labels 4 chars
+		// each with 3-space gaps → View starts at local X=15.
+		// Wire X=17 → local X=16 (inside [15, 19)).
+		_, _ = ptmx.Write([]byte("\x1b[<0;17;1M")) // click View
+		time.Sleep(300 * time.Millisecond)
+		// View dropdown anchors at X=15. First body row = local Y=2.
+		// Wire (X=20, Y=3) → local (19, 2) → dropdown row 1 → hits
+		// ItemActions[0] (Toggle line numbers).
+		_, _ = ptmx.Write([]byte("\x1b[<0;20;3M"))
+		time.Sleep(300 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("q"))
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("binary did not exit within timeout")
+	}
+	_ = c.Wait()
+
+	g := tui.DecodeANSI(buf.Bytes(), 80, 30)
+	// After the toggle, the gutter should be off. The buffer's first
+	// text cell that used to be a digit '1' at column 1 is now blank
+	// or content. Assert the cell at (1, 1) is NOT the digit '1'.
+	if r := g.At(1, 1).Rune; r == '1' {
+		t.Errorf("gutter still on after toggle: cell (1,1) = %c", r)
+	}
+}
+
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
 func stripANSI(b []byte) string { return ansiRE.ReplaceAllString(string(b), "") }

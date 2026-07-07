@@ -225,8 +225,15 @@ func newState() *state {
 	}
 	viewDropdown := &menuDropdown{
 		Title:   "View",
-		Body:    []string{"Toggle line numbers  (stub)", "Focus editor         i", "Command palette      Ctrl+P"},
+		Body:    []string{"Toggle line numbers", "Focus editor         i", "Command palette      Ctrl+P"},
 		AnchorY: 1,
+	}
+	// Row 0 flips the TextEditor gutter. Rows 1 and 2 are
+	// informational — the shortcut already toggles the state.
+	viewDropdown.ItemActions = []func(){
+		func() { tv.ShowGutter = !tv.ShowGutter },
+		nil,
+		nil,
 	}
 	helpDropdown := &menuDropdown{
 		Title: "Help",
@@ -354,11 +361,15 @@ func (p *cellPopover) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 // tui-explorer's helper. See its docstring for the rationale.
 type menuDropdown struct {
 	toolkit.Base
-	Title   string
-	Body    []string
-	Visible bool
-	AnchorX int
-	AnchorY int
+	Title string
+	Body  []string
+	// ItemActions runs when the user clicks the matching body row.
+	// A nil entry (or a shorter slice) makes that row informational —
+	// the click still dismisses the dropdown but no action fires.
+	ItemActions []func()
+	Visible     bool
+	AnchorX     int
+	AnchorY     int
 }
 
 func (d *menuDropdown) size() (int, int) {
@@ -410,9 +421,16 @@ func (d *menuDropdown) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 }
 
 func (d *menuDropdown) OnEvent(ev toolkit.Event) {
-	if ev.Kind == toolkit.EventClick {
-		d.Visible = false
+	if ev.Kind != toolkit.EventClick {
+		return
 	}
+	// Body rows start at local Y=1 (title on 0). idx maps a click
+	// row to its ItemActions index; nil / out-of-range = no-op.
+	idx := ev.Y - 1
+	if idx >= 0 && idx < len(d.ItemActions) && d.ItemActions[idx] != nil {
+		d.ItemActions[idx]()
+	}
+	d.Visible = false
 }
 
 // packedVBox — same shape as cmd/tui-explorer's local helper:

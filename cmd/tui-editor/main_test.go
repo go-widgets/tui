@@ -728,6 +728,23 @@ func TestNewStateWiresMenuItemsToDropdowns(t *testing.T) {
 	}
 }
 
+// TestNewStateViewToggleLineNumbers — flip closure body coverage.
+func TestNewStateViewToggleLineNumbers(t *testing.T) {
+	s := newState()
+	before := s.tv.ShowGutter
+	if len(s.viewDropdown.ItemActions) < 1 || s.viewDropdown.ItemActions[0] == nil {
+		t.Fatal("viewDropdown row 0 has no ItemAction")
+	}
+	s.viewDropdown.ItemActions[0]()
+	if s.tv.ShowGutter == before {
+		t.Errorf("Toggle line numbers did not flip ShowGutter")
+	}
+	s.viewDropdown.ItemActions[0]()
+	if s.tv.ShowGutter != before {
+		t.Errorf("second toggle did not restore ShowGutter")
+	}
+}
+
 // -----------------------------------------------------------------
 // menuDropdown (tui-editor local copy)
 // -----------------------------------------------------------------
@@ -785,6 +802,54 @@ func TestMenuDropdownDrawVisibleRendersTitleAndBody(t *testing.T) {
 	d.Draw(pnt, toolkit.DefaultLight())
 	// Empty title → title-draw branch skipped.
 	(&menuDropdown{Body: []string{"only"}, Visible: true}).Draw(pnt, toolkit.DefaultLight())
+}
+
+// TestMenuDropdownItemActionFiresOnRowClick covers every branch of
+// the OnEvent handler: action fires, nil-action row, out-of-range,
+// no ItemActions defined, and the non-click ignore path.
+func TestMenuDropdownItemActionFiresOnRowClick(t *testing.T) {
+	fired := -1
+	d := &menuDropdown{
+		Body: []string{"a", "b", "c"},
+		ItemActions: []func(){
+			func() { fired = 0 },
+			nil, // informational row
+			func() { fired = 2 },
+		},
+		Visible: true,
+	}
+	// Body row 0 (local Y=1) fires ItemActions[0].
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 1})
+	if fired != 0 || d.Visible {
+		t.Errorf("row 0: fired=%d visible=%v", fired, d.Visible)
+	}
+	// Nil-action row closes but fires nothing.
+	fired = -1
+	d.Visible = true
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 2})
+	if fired != -1 || d.Visible {
+		t.Errorf("nil row: fired=%d visible=%v", fired, d.Visible)
+	}
+	// Out-of-range row (past end) closes without firing.
+	fired = -1
+	d.Visible = true
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 99})
+	if fired != -1 || d.Visible {
+		t.Errorf("oob row: fired=%d visible=%v", fired, d.Visible)
+	}
+	// Title row (Y=0) → idx=-1 → nothing fires, still closes.
+	fired = -1
+	d.Visible = true
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 0})
+	if fired != -1 || d.Visible {
+		t.Errorf("title row: fired=%d visible=%v", fired, d.Visible)
+	}
+	// Dropdown without any ItemActions defined — must not crash.
+	e := &menuDropdown{Body: []string{"a"}, Visible: true}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, Y: 1})
+	if e.Visible {
+		t.Error("no-actions dropdown did not close on body click")
+	}
 }
 
 func TestMenuDropdownOnEventClickCloses(t *testing.T) {

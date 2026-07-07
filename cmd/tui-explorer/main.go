@@ -199,11 +199,15 @@ func (p *cellPopover) HitTest(px, py int) bool {
 //   - Clicking anywhere on it closes it (dismisses without action)
 type menuDropdown struct {
 	toolkit.Base
-	Title   string
-	Body    []string
-	Visible bool
-	AnchorX int
-	AnchorY int
+	Title string
+	Body  []string
+	// ItemActions runs when the user clicks the matching body row.
+	// A nil entry (or a shorter slice) makes that row informational —
+	// the click still dismisses the dropdown but no action fires.
+	ItemActions []func()
+	Visible     bool
+	AnchorX     int
+	AnchorY     int
 }
 
 func (d *menuDropdown) size() (int, int) {
@@ -265,13 +269,18 @@ func (d *menuDropdown) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 }
 
-// OnEvent — click anywhere on the dropdown closes it. This mirrors
-// standard menu UX where a click either activates a highlighted
-// item or dismisses the menu.
+// OnEvent — click on a body row fires that row's ItemAction (if
+// set) then dismisses the dropdown. Click on title / outside body
+// range still dismisses without firing an action.
 func (d *menuDropdown) OnEvent(ev toolkit.Event) {
-	if ev.Kind == toolkit.EventClick {
-		d.Visible = false
+	if ev.Kind != toolkit.EventClick {
+		return
 	}
+	idx := ev.Y - 1
+	if idx >= 0 && idx < len(d.ItemActions) && d.ItemActions[idx] != nil {
+		d.ItemActions[idx]()
+	}
+	d.Visible = false
 }
 
 func (p *cellPopover) Draw(pnt painter.Painter, theme *toolkit.Theme) {
@@ -369,8 +378,14 @@ func newState() *state {
 	}
 	viewDropdown := &menuDropdown{
 		Title:   "View",
-		Body:    []string{"Toggle sidebar  (drag grip)", "Focus preview   Enter", "Refresh         Enter"},
+		Body:    []string{"Toggle line numbers", "Toggle sidebar  (drag grip)", "Focus preview   Enter", "Refresh         Enter"},
 		AnchorY: 1,
+	}
+	viewDropdown.ItemActions = []func(){
+		func() { content.ShowGutter = !content.ShowGutter },
+		nil, // "Toggle sidebar" — informational (grip drag does it)
+		nil, // "Focus preview" — informational
+		nil, // "Refresh" — informational
 	}
 	helpDropdown := &menuDropdown{
 		Title: "Help",

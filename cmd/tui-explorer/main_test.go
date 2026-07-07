@@ -551,7 +551,8 @@ func TestMenuDropdownDrawVisibleRendersTitleAndBody(t *testing.T) {
 
 func TestMenuDropdownOnEventClickCloses(t *testing.T) {
 	d := &menuDropdown{Visible: true}
-	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 1})
+	// A title-row (Y=0) click closes without firing anything.
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 0})
 	if d.Visible {
 		t.Error("click did not close dropdown")
 	}
@@ -560,6 +561,63 @@ func TestMenuDropdownOnEventClickCloses(t *testing.T) {
 	d.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
 	if !d.Visible {
 		t.Error("keydown incorrectly closed dropdown")
+	}
+}
+
+// TestMenuDropdownItemActionFiresOnRowClick — mirrors tui-editor's
+// coverage of every ItemActions branch.
+func TestMenuDropdownItemActionFiresOnRowClick(t *testing.T) {
+	fired := -1
+	d := &menuDropdown{
+		Body: []string{"a", "b", "c"},
+		ItemActions: []func(){
+			func() { fired = 0 },
+			nil,
+			func() { fired = 2 },
+		},
+		Visible: true,
+	}
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 1})
+	if fired != 0 || d.Visible {
+		t.Errorf("row 0: fired=%d visible=%v", fired, d.Visible)
+	}
+	fired = -1
+	d.Visible = true
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 2})
+	if fired != -1 || d.Visible {
+		t.Errorf("nil row: fired=%d visible=%v", fired, d.Visible)
+	}
+	fired = -1
+	d.Visible = true
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 99})
+	if fired != -1 || d.Visible {
+		t.Errorf("oob row: fired=%d visible=%v", fired, d.Visible)
+	}
+	// No-ItemActions dropdown must not crash on body click.
+	e := &menuDropdown{Body: []string{"a"}, Visible: true}
+	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, Y: 1})
+	if e.Visible {
+		t.Error("no-actions dropdown did not close on body click")
+	}
+}
+
+// TestNewStateViewToggleLineNumbers verifies the closure inside
+// newState() that flips content.ShowGutter — that closure body is
+// otherwise uncovered because production code only reaches it via
+// user click.
+func TestNewStateViewToggleLineNumbers(t *testing.T) {
+	s := newState()
+	before := s.content.ShowGutter
+	if len(s.viewDropdown.ItemActions) < 1 || s.viewDropdown.ItemActions[0] == nil {
+		t.Fatal("viewDropdown row 0 has no ItemAction")
+	}
+	s.viewDropdown.ItemActions[0]()
+	if s.content.ShowGutter == before {
+		t.Errorf("Toggle line numbers did not flip ShowGutter (was %v)", before)
+	}
+	s.viewDropdown.ItemActions[0]()
+	if s.content.ShowGutter != before {
+		t.Errorf("second Toggle did not restore ShowGutter (was %v)", before)
 	}
 }
 
