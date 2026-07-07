@@ -30,13 +30,10 @@ import (
 	"flag"
 	"io"
 	"os"
-	"strconv"
-	"unicode/utf8"
 
 	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
-	"github.com/go-widgets/tui/syntax"
 )
 
 // runFunc / osExit / newAppFunc are dependency-injection seams so
@@ -90,7 +87,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // can address them by field name without threading a container tree.
 type state struct {
 	fileList      *fileList
-	content       *textPreview
+	content       *tui.TextEditor
 	status        *toolkit.Label
 	menuBar       *menuBar
 	helpPopover   *cellPopover
@@ -332,8 +329,9 @@ func newState() *state {
 	paths := []string{"/src/main.go", "/src/util.go", "/docs/README.md", "/LICENSE"}
 
 	fl := &fileList{items: paths, selected: 0}
-	content := &textPreview{}
-	content.setText(files[paths[0]], paths[0])
+	content := &tui.TextEditor{ReadOnly: true, ShowGutter: true}
+	content.Filename = paths[0]
+	content.SetText(files[paths[0]])
 
 	body := &hSplit{left: fl, right: content, leftFrac: 30}
 
@@ -446,93 +444,13 @@ func newState() *state {
 // selected fileList index.
 func (s *state) syncContent() {
 	if s.fileList.selected < 0 || s.fileList.selected >= len(s.paths) {
-		s.content.setText("(no selection)", "")
+		s.content.Filename = ""
+		s.content.SetText("(no selection)")
 		return
 	}
-	s.content.setText(s.files[s.paths[s.fileList.selected]], s.paths[s.fileList.selected])
-}
-
-// textPreview is a cell-native read-only text view: 1 line per cell
-// row, no border, no cursor. Replaces toolkit.TextView which uses
-// GlyphHeight+4 = 11 cells per line in cell mode — only ~2 lines
-// fit in a typical terminal body.
-type textPreview struct {
-	toolkit.Base
-	lines []string
-	spans [][]syntax.Span // per-line syntax-highlighted spans (see setText)
-}
-
-// Text returns the current buffer as a single string (lines joined
-// by newlines). Retained mainly for tests that inspect the sync
-// path: syncContent → setText → Text should round-trip the file
-// body without loss.
-func (t *textPreview) Text() string {
-	if len(t.lines) == 0 {
-		return ""
-	}
-	total := 0
-	for _, l := range t.lines {
-		total += len(l) + 1
-	}
-	buf := make([]byte, 0, total)
-	for i, l := range t.lines {
-		if i > 0 {
-			buf = append(buf, '\n')
-		}
-		buf = append(buf, l...)
-	}
-	return string(buf)
-}
-
-func (t *textPreview) setText(s, filename string) {
-	if s == "" {
-		t.lines = nil
-		t.spans = nil
-		return
-	}
-	t.lines = splitLines(s)
-	t.spans = syntax.Highlight(s, filename)
-}
-
-// splitLines splits s on '\n', dropping the trailing empty element
-// if the string ends with '\n'. Keeps intermediate empties (blank
-// lines in source files must render as blank rows).
-func splitLines(s string) []string {
-	out := make([]string, 0, 8)
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
-}
-
-func (t *textPreview) Draw(p painter.Painter, theme *toolkit.Theme) {
-	r := t.Bounds()
-	p.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
-		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
-	})
-	gutter := tui.GutterWidth(len(t.spans))
-	numInk := tui.LineNumberInk(theme)
-	for i, line := range t.spans {
-		y := r.Y + i
-		if y >= r.Y+r.H {
-			break
-		}
-		// Right-aligned line number in the gutter, then the code.
-		num := strconv.Itoa(i + 1)
-		toolkit.DrawText(p, r.X+gutter-1-len(num), y, num, numInk)
-		x := r.X + gutter
-		for _, sp := range line {
-			toolkit.DrawText(p, x, y, sp.Text, tui.SyntaxInk(sp.Kind, theme))
-			x += utf8.RuneCountInString(sp.Text) // 1 cell per rune
-		}
-	}
+	path := s.paths[s.fileList.selected]
+	s.content.Filename = path
+	s.content.SetText(s.files[path])
 }
 
 // fileList is a cell-native list widget: one item per row, selection

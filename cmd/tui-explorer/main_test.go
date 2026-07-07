@@ -609,7 +609,7 @@ func TestGripZoneCenters(t *testing.T) {
 // dragging=true and does not route to either child.
 func TestHSplitClickOnGripStartsDragSession(t *testing.T) {
 	fl := &fileList{items: []string{"a", "b"}, selected: 0}
-	tp := &textPreview{}
+	tp := &tui.TextEditor{ReadOnly: true}
 	h := &hSplit{left: fl, right: tp, leftFrac: 30}
 	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 20})
 	// gripLocalX = 100 * 30 / 100 = 30.
@@ -626,7 +626,7 @@ func TestHSplitClickOnGripStartsDragSession(t *testing.T) {
 // leftFrac to X*100/W clamped to [10,90] and re-runs SetBounds.
 func TestHSplitDragUpdatesLeftFrac(t *testing.T) {
 	fl := &fileList{items: []string{"a"}, selected: 0}
-	tp := &textPreview{}
+	tp := &tui.TextEditor{ReadOnly: true}
 	h := &hSplit{left: fl, right: tp, leftFrac: 30, dragging: true}
 	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 10})
 	h.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 50, Y: 5})
@@ -673,7 +673,7 @@ func TestHSplitMouseUpEndsSession(t *testing.T) {
 // EventMouseUp without an active session is silently dropped.
 func TestHSplitDragOutsideSessionIsIgnored(t *testing.T) {
 	fl := &fileList{items: []string{"a"}, selected: 0}
-	tp := &textPreview{}
+	tp := &tui.TextEditor{ReadOnly: true}
 	h := &hSplit{left: fl, right: tp, leftFrac: 30}
 	h.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 10})
 	beforeFrac := h.leftFrac
@@ -736,8 +736,8 @@ func TestHSplitOnEventForwardsToLeft(t *testing.T) {
 // translated X = 60-30 = 30.
 func TestHSplitClickRoutesByHitTest(t *testing.T) {
 	fl := &fileList{items: []string{"a", "b", "c", "d"}, selected: 0}
-	tp := &textPreview{}
-	tp.setText("x\ny\nz", "")
+	tp := &tui.TextEditor{ReadOnly: true}
+	tp.SetText("x\ny\nz")
 	h := &hSplit{left: fl, right: tp, leftFrac: 30}
 	h.SetBounds(toolkit.Rect{X: 10, Y: 5, W: 100, H: 20})
 	// Local (2, 2) → left pane; fileList sees (2, 2), selects item 2.
@@ -771,47 +771,9 @@ func TestHSplitClickOnRightWithNilRight(t *testing.T) {
 	h.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 30, Y: 3})
 }
 
-// textPreview tests.
-func TestTextPreviewSetTextAndText(t *testing.T) {
-	tp := &textPreview{}
-	tp.setText("a\nb\nc", "")
-	if len(tp.lines) != 3 {
-		t.Fatalf("lines = %v, want 3", tp.lines)
-	}
-	if got := tp.Text(); got != "a\nb\nc" {
-		t.Errorf("Text() = %q, want %q", got, "a\nb\nc")
-	}
-}
-func TestTextPreviewSetEmptyClears(t *testing.T) {
-	tp := &textPreview{lines: []string{"a"}}
-	tp.setText("", "")
-	if tp.lines != nil {
-		t.Errorf("lines not nil after setText(\"\"): %v", tp.lines)
-	}
-	if got := tp.Text(); got != "" {
-		t.Errorf("Text() empty = %q, want empty", got)
-	}
-}
-func TestTextPreviewSetTextTrailingNewline(t *testing.T) {
-	tp := &textPreview{}
-	tp.setText("hello\n", "")
-	if len(tp.lines) != 1 || tp.lines[0] != "hello" {
-		t.Errorf("trailing newline handling wrong: %v", tp.lines)
-	}
-}
-func TestTextPreviewDrawRendersLinesAndClipsBounds(t *testing.T) {
-	tp := &textPreview{}
-	tp.setText("a\nb\nc\nd\ne", "")
-	tp.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3}) // only 3 rows fit
-	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
-	tp.Draw(pnt, toolkit.DefaultLight())
-}
-func TestTextPreviewDrawEmpty(t *testing.T) {
-	tp := &textPreview{}
-	tp.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 3})
-	pnt := painter.NewPixelPainter(make([]byte, 10*3*4), 10, 3)
-	tp.Draw(pnt, toolkit.DefaultLight())
-}
+// The read-only content preview is now a tui.TextEditor (ReadOnly); its
+// SetText / Draw / Text behaviour is covered by the tui package's TextEditor
+// tests. The state-level sync path is covered by TestEnterSyncsContent etc.
 
 // cellPopover Draw tests.
 func TestCellPopoverDrawInvisibleIsNoop(t *testing.T) {
