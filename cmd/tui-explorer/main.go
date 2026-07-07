@@ -613,11 +613,34 @@ type hSplit struct {
 }
 
 const (
-	hSplitGripRune  = '│'
+	// hSplitBarRune is the thin vertical char used for most of the
+	// separator column; hSplitGripRune is the "heavy" vertical used
+	// for the centred grip zone so the user has a visible handle
+	// hint on the resize bar.
+	hSplitBarRune   = '│'
+	hSplitGripRune  = '┃'
 	hSplitMinFrac   = 10
 	hSplitMaxFrac   = 90
-	hSplitGripFocus = 4 // dragging leftFrac step (unused now, reserved for keyboard resize)
+	hSplitGripFocus = 4 // reserved for future keyboard resize
 )
+
+// gripZone returns [y0, y1) of the grip-handle band: a centred strip
+// ≈ 1/6 of the bar's height, min 3 cells, max 7. The full bar is
+// clickable — the strip is just a visual affordance.
+func gripZone(barH int) (int, int) {
+	h := barH / 6
+	if h < 3 {
+		h = 3
+	}
+	if h > 7 {
+		h = 7
+	}
+	if h > barH {
+		h = barH
+	}
+	y0 := (barH - h) / 2
+	return y0, y0 + h
+}
 
 // gripLocalX returns the local-X column the grip occupies given the
 // current bounds and leftFrac.
@@ -659,8 +682,16 @@ func (h *hSplit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	pnt.FillRect(painter.Rect{X: r.X + lw, Y: r.Y, W: 1, H: r.H}, painter.RGBA{
 		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
 	})
-	for y := r.Y; y < r.Y+r.H; y++ {
-		toolkit.DrawText(pnt, r.X+lw, y, string(hSplitGripRune), col)
+	// Thin bar for the entire column, with a heavy strip in the
+	// middle (≈ 1/6 of the bar's height) that serves as a visible
+	// grip handle affordance. Both regions are clickable.
+	gy0, gy1 := gripZone(r.H)
+	for y := 0; y < r.H; y++ {
+		g := hSplitBarRune
+		if y >= gy0 && y < gy1 {
+			g = hSplitGripRune
+		}
+		toolkit.DrawText(pnt, r.X+lw, r.Y+y, string(g), col)
 	}
 }
 

@@ -582,6 +582,29 @@ func TestHSplitDrawPaintsGrip(t *testing.T) {
 	h.Draw(pnt, toolkit.DefaultLight())
 }
 
+// TestGripZoneCenters — the grip strip is a centred fraction of the
+// bar height, clamped to [3, 7]. Exercises min / max / natural cases
+// + the "strip taller than the bar" clamp for tiny bars.
+func TestGripZoneCenters(t *testing.T) {
+	// H=28 → h = 28/6 = 4 → centred at y0 = (28-4)/2 = 12 → [12, 16).
+	if y0, y1 := gripZone(28); y0 != 12 || y1 != 16 {
+		t.Errorf("gripZone(28) = [%d, %d), want [12, 16)", y0, y1)
+	}
+	// H=10 → h = 10/6 = 1 → clamped up to 3 → y0 = (10-3)/2 = 3 → [3, 6).
+	if y0, y1 := gripZone(10); y0 != 3 || y1 != 6 {
+		t.Errorf("gripZone(10) = [%d, %d), want [3, 6)", y0, y1)
+	}
+	// H=60 → h = 60/6 = 10 → clamped down to 7 → y0 = (60-7)/2 = 26 → [26, 33).
+	if y0, y1 := gripZone(60); y0 != 26 || y1 != 33 {
+		t.Errorf("gripZone(60) = [%d, %d), want [26, 33)", y0, y1)
+	}
+	// H=2 (smaller than minimum grip height 3) → h clamps down to 2
+	// so the strip covers the whole bar.
+	if y0, y1 := gripZone(2); y0 != 0 || y1 != 2 {
+		t.Errorf("gripZone(2) = [%d, %d), want [0, 2)", y0, y1)
+	}
+}
+
 // TestHSplitClickOnGripStartsDragSession — a click at ev.X == lw sets
 // dragging=true and does not route to either child.
 func TestHSplitClickOnGripStartsDragSession(t *testing.T) {
