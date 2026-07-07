@@ -40,6 +40,134 @@ type TextEditor struct {
 	spans      [][]syntax.Span
 	undo, redo []teSnapshot
 	lastQuery  string // remembered by Find for FindNext
+
+	// Selection: anchored at (anchorLine, anchorCol), with the caret as the
+	// moving end; active only while selActive. clip is the widget-local
+	// clipboard for Copy/Cut/Paste.
+	anchorLine, anchorCol int
+	selActive             bool
+	clip                  string
+}
+
+// selRange returns the normalised selection as [start, end) plus whether a
+// non-empty selection is active.
+func (t *TextEditor) selRange() (sl, sc, el, ec int, ok bool) {
+	if !t.selActive {
+		return 0, 0, 0, 0, false
+	}
+	al, ac, cl, cc := t.anchorLine, t.anchorCol, t.CursorLine, t.CursorCol
+	if al > cl || (al == cl && ac > cc) {
+		al, ac, cl, cc = cl, cc, al, ac
+	}
+	return al, ac, cl, cc, al != cl || ac != cc
+}
+
+// SelectedText returns the text covered by the active selection, or "" if none.
+func (t *TextEditor) SelectedText() string {
+	sl, sc, el, ec, ok := t.selRange()
+	if !ok {
+		return ""
+	}
+	if sl == el {
+		return t.Lines[sl][sc:ec]
+	}
+	var b strings.Builder
+	b.WriteString(t.Lines[sl][sc:])
+	for i := sl + 1; i < el; i++ {
+		b.WriteByte('\n')
+		b.WriteString(t.Lines[i])
+	}
+	b.WriteByte('\n')
+	b.WriteString(t.Lines[el][:ec])
+	return b.String()
+}
+
+// Copy stores the selection in the widget clipboard and returns it.
+func (t *TextEditor) Copy() string {
+	t.clip = t.SelectedText()
+	return t.clip
+}
+
+// deleteRange removes [sl,sc)-(el,ec], leaving the caret at the start and no
+// active selection. The caller records undo.
+func (t *TextEditor) deleteRange(sl, sc, el, ec int) {
+	if sl == el {
+		t.Lines[sl] = t.Lines[sl][:sc] + t.Lines[sl][ec:]
+	} else {
+		t.Lines[sl] = t.Lines[sl][:sc] + t.Lines[el][ec:]
+		t.Lines = append(t.Lines[:sl+1], t.Lines[el+1:]...)
+	}
+	t.CursorLine, t.CursorCol = sl, sc
+	t.selActive = false
+}
+
+// DeleteSelection removes the selected text (a single undo step). Returns
+// whether anything was deleted.
+func (t *TextEditor) DeleteSelection() bool {
+	sl, sc, el, ec, ok := t.selRange()
+	if !ok || t.ReadOnly {
+		return false
+	}
+	t.pushUndo()
+	t.deleteRange(sl, sc, el, ec)
+	t.rehighlight()
+	return true
+}
+
+// Cut copies the selection to the clipboard and removes it, returning the text.
+func (t *TextEditor) Cut() string {
+	s := t.Copy()
+	if s != "" {
+		t.DeleteSelection()
+	}
+	return s
+}
+
+// insertText inserts s (which may contain newlines) at the caret, moving the
+// caret to the end of the inserted text. The caller records undo.
+func (t *TextEditor) insertText(s string) {
+	parts := strings.Split(s, "\n")
+	line := t.Lines[t.CursorLine]
+	head, tail := line[:t.CursorCol], line[t.CursorCol:]
+	if len(parts) == 1 {
+		t.Lines[t.CursorLine] = head + parts[0] + tail
+		t.CursorCol += len(parts[0])
+		return
+	}
+	inserted := make([]string, 0, len(parts))
+	inserted = append(inserted, head+parts[0])
+	inserted = append(inserted, parts[1:len(parts)-1]...)
+	last := parts[len(parts)-1]
+	inserted = append(inserted, last+tail)
+	rest := append([]string(nil), t.Lines[t.CursorLine+1:]...)
+	t.Lines = append(t.Lines[:t.CursorLine], append(inserted, rest...)...)
+	t.CursorLine += len(parts) - 1
+	t.CursorCol = len(last)
+}
+
+// Paste inserts the clipboard at the caret, replacing an active selection. A
+// single undo step. No-op when ReadOnly or the clipboard is empty.
+func (t *TextEditor) Paste() {
+	if t.ReadOnly || t.clip == "" {
+		return
+	}
+	t.pushUndo()
+	if sl, sc, el, ec, ok := t.selRange(); ok {
+		t.deleteRange(sl, sc, el, ec)
+	}
+	t.insertText(t.clip)
+	t.rehighlight()
+}
+
+// dropSelectionForEdit deletes the active selection without pushing undo -- used
+// at the start of an insert/delete so typing replaces the selection within the
+// caller's single undo step. Returns whether a selection was deleted.
+func (t *TextEditor) dropSelectionForEdit() bool {
+	if sl, sc, el, ec, ok := t.selRange(); ok {
+		t.deleteRange(sl, sc, el, ec)
+		return true
+	}
+	return false
 }
 
 // Find moves the caret to the next occurrence of query at or after the current
@@ -240,6 +368,30 @@ func (t *TextEditor) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	})
 	pad := t.leftPad()
 	numInk := LineNumberInk(theme)
+	// Selection highlight, painted under the gutter numbers + code.
+	if sl, sc, el, ec, ok := t.selRange(); ok {
+		selBg := painter.RGBA{R: theme.Accent.R, G: theme.Accent.G, B: theme.Accent.B, A: theme.Accent.A}
+		for li := sl; li <= el; li++ {
+			y := r.Y + li
+			if li >= len(t.Lines) || y < r.Y || y >= r.Y+r.H {
+				continue
+			}
+			startC, endC := 0, len(t.Lines[li])
+			if li == sl {
+				startC = sc
+			}
+			if li == el {
+				endC = ec
+			}
+			w := endC - startC
+			if li != el {
+				w++ // include the line-break cell so full-line spans read solid
+			}
+			if w > 0 {
+				pnt.FillRect(painter.Rect{X: r.X + pad + startC, Y: y, W: w, H: 1}, selBg)
+			}
+		}
+	}
 	for i, line := range t.spans {
 		y := r.Y + i
 		if y >= r.Y+r.H {
@@ -279,6 +431,7 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 	case toolkit.EventChar:
 		if !t.ReadOnly {
 			t.pushUndo()
+			t.dropSelectionForEdit()
 			line := t.Lines[t.CursorLine]
 			if t.CursorCol > len(line) {
 				t.CursorCol = len(line)
@@ -291,12 +444,23 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 		case "Backspace":
 			if !t.ReadOnly {
 				t.pushUndo()
-				t.backspace()
+				if !t.dropSelectionForEdit() {
+					t.backspace()
+				}
 			}
 		case "Enter":
 			if !t.ReadOnly {
 				t.pushUndo()
+				t.dropSelectionForEdit()
 				t.splitLine()
+			}
+		case "Ctrl+X":
+			if !t.ReadOnly {
+				t.Cut()
+			}
+		case "Ctrl+V":
+			if !t.ReadOnly {
+				t.Paste()
 			}
 		case "Ctrl+Z":
 			if !t.ReadOnly && len(t.undo) > 0 {
@@ -315,22 +479,35 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 				t.CursorLine--
 				t.clampCol()
 			}
+			t.selActive = false
 		case "Down":
 			if t.CursorLine < len(t.Lines)-1 {
 				t.CursorLine++
 				t.clampCol()
 			}
+			t.selActive = false
 		case "Left":
 			if t.CursorCol > 0 {
 				t.CursorCol--
 			}
+			t.selActive = false
 		case "Right":
 			if t.CursorCol < len(t.Lines[t.CursorLine]) {
 				t.CursorCol++
 			}
+			t.selActive = false
 		}
 	case toolkit.EventClick:
+		// A click positions the caret and drops the anchor there; a subsequent
+		// drag from here grows the selection.
 		t.clickAt(ev.X, ev.Y)
+		t.anchorLine, t.anchorCol = t.CursorLine, t.CursorCol
+		t.selActive = false
+	case toolkit.EventMouseDrag:
+		// Extend the selection: the caret follows the drag, anchored at the
+		// press position.
+		t.clickAt(ev.X, ev.Y)
+		t.selActive = t.anchorLine != t.CursorLine || t.anchorCol != t.CursorCol
 	}
 	t.rehighlight()
 }
