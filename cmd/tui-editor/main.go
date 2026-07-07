@@ -41,12 +41,10 @@ import (
 	"io"
 	"os"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
-	"github.com/go-widgets/tui/syntax"
 )
 
 // runFunc / osExit / newAppFunc / runAppFunc are dependency-injection
@@ -123,7 +121,7 @@ type state struct {
 	mode         mode
 	file         string // "" == unnamed buffer
 	dirty        bool
-	tv           *cellTextEdit
+	tv           *tui.TextEditor
 	statusbar    *toolkit.Label
 	menuBar      *menuBar
 	palette      *cellPopover
@@ -204,7 +202,8 @@ func (m *menuBar) OnEvent(ev toolkit.Event) {
 // the pane background inheriting the frame Background fill, which
 // makes the panel boundary imperceptible in dark theme.
 func newState() *state {
-	tv := &cellTextEdit{Focused: true, Lines: []string{""}}
+	tv := tui.NewTextEditor() // ShowGutter=true, one empty line, spans primed
+	tv.Focused = true
 
 	statusbar := toolkit.NewLabel("VIEW  |  *scratch*  |  1:1")
 
@@ -302,181 +301,6 @@ func newState() *state {
 		readFile:     os.ReadFile,
 		writeFile:    os.WriteFile,
 	}
-}
-
-// cellTextEdit is a cell-native editable text buffer: 1 cell per
-// glyph, arrow-key navigation, insert on EventChar, Backspace, Enter
-// to split a line. Fills its bounds with SurfaceAlt so the pane
-// boundary is visible against near-black chrome rows in dark theme.
-// Replaces toolkit.TextView which uses lineH = GlyphHeight + 4 = 11
-// cells per line in cell mode (only 2 lines visible in a 22-row
-// body) + fills with Surface (imperceptible from Background).
-type cellTextEdit struct {
-	toolkit.Base
-	Lines      []string
-	CursorLine int
-	CursorCol  int
-	Focused    bool
-	Filename   string          // drives the syntax language; "" == plain
-	spans      [][]syntax.Span // per-line highlight, recomputed on every change
-}
-
-// rehighlight recomputes the per-line syntax spans from the current buffer +
-// filename. Called after any mutation (SetText / OnEvent) so the colouring
-// tracks live edits.
-func (t *cellTextEdit) rehighlight() {
-	t.spans = syntax.Highlight(t.Text(), t.Filename)
-}
-
-func (t *cellTextEdit) Text() string {
-	if len(t.Lines) == 0 {
-		return ""
-	}
-	total := 0
-	for _, l := range t.Lines {
-		total += len(l) + 1
-	}
-	buf := make([]byte, 0, total)
-	for i, l := range t.Lines {
-		if i > 0 {
-			buf = append(buf, '\n')
-		}
-		buf = append(buf, l...)
-	}
-	return string(buf)
-}
-
-func (t *cellTextEdit) SetText(s string) {
-	t.Lines = nil
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			t.Lines = append(t.Lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		t.Lines = append(t.Lines, s[start:])
-	}
-	if len(t.Lines) == 0 {
-		t.Lines = []string{""}
-	}
-	t.CursorLine = 0
-	t.CursorCol = 0
-	t.rehighlight()
-}
-
-func (t *cellTextEdit) Draw(pnt painter.Painter, theme *toolkit.Theme) {
-	r := t.Bounds()
-	// SurfaceAlt-filled pane background — perceptibly different from
-	// chrome (Background) so the panel edge is visible in any theme.
-	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
-		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
-	})
-	for i, line := range t.spans {
-		y := r.Y + i
-		if y >= r.Y+r.H {
-			break
-		}
-		x := r.X + 1
-		for _, sp := range line {
-			toolkit.DrawText(pnt, x, y, sp.Text, tui.SyntaxInk(sp.Kind, theme))
-			x += utf8.RuneCountInString(sp.Text) // 1 cell per rune
-		}
-	}
-	// Cursor: reverse-video single cell at the caret position.
-	if t.Focused && t.CursorLine >= 0 && t.CursorLine < r.H {
-		cx := r.X + 1 + t.CursorCol
-		cy := r.Y + t.CursorLine
-		if cx < r.X+r.W && cy < r.Y+r.H {
-			pnt.FillRect(painter.Rect{X: cx, Y: cy, W: 1, H: 1}, painter.RGBA{
-				R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A,
-			})
-		}
-	}
-}
-
-func (t *cellTextEdit) OnEvent(ev toolkit.Event) {
-	if len(t.Lines) == 0 {
-		t.Lines = []string{""}
-	}
-	switch ev.Kind {
-	case toolkit.EventChar:
-		line := t.Lines[t.CursorLine]
-		if t.CursorCol > len(line) {
-			t.CursorCol = len(line)
-		}
-		t.Lines[t.CursorLine] = line[:t.CursorCol] + ev.Code + line[t.CursorCol:]
-		t.CursorCol += len(ev.Code)
-	case toolkit.EventKeyDown:
-		switch ev.Code {
-		case "Backspace":
-			line := t.Lines[t.CursorLine]
-			if t.CursorCol > 0 && t.CursorCol <= len(line) {
-				t.Lines[t.CursorLine] = line[:t.CursorCol-1] + line[t.CursorCol:]
-				t.CursorCol--
-			} else if t.CursorCol == 0 && t.CursorLine > 0 {
-				prev := t.Lines[t.CursorLine-1]
-				t.CursorCol = len(prev)
-				t.Lines[t.CursorLine-1] = prev + line
-				t.Lines = append(t.Lines[:t.CursorLine], t.Lines[t.CursorLine+1:]...)
-				t.CursorLine--
-			}
-		case "Enter":
-			line := t.Lines[t.CursorLine]
-			if t.CursorCol > len(line) {
-				t.CursorCol = len(line)
-			}
-			head, tail := line[:t.CursorCol], line[t.CursorCol:]
-			t.Lines[t.CursorLine] = head
-			t.Lines = append(t.Lines[:t.CursorLine+1], append([]string{tail}, t.Lines[t.CursorLine+1:]...)...)
-			t.CursorLine++
-			t.CursorCol = 0
-		case "Up":
-			if t.CursorLine > 0 {
-				t.CursorLine--
-				if t.CursorCol > len(t.Lines[t.CursorLine]) {
-					t.CursorCol = len(t.Lines[t.CursorLine])
-				}
-			}
-		case "Down":
-			if t.CursorLine < len(t.Lines)-1 {
-				t.CursorLine++
-				if t.CursorCol > len(t.Lines[t.CursorLine]) {
-					t.CursorCol = len(t.Lines[t.CursorLine])
-				}
-			}
-		case "Left":
-			if t.CursorCol > 0 {
-				t.CursorCol--
-			}
-		case "Right":
-			if t.CursorCol < len(t.Lines[t.CursorLine]) {
-				t.CursorCol++
-			}
-		}
-	case toolkit.EventClick:
-		// A click positions the cursor at the clicked cell. Y beyond
-		// the last line clamps to the last line; X beyond the line
-		// length clamps to end-of-line. Y < 0 or X < 0 clamp to 0.
-		y := ev.Y
-		if y < 0 {
-			y = 0
-		}
-		if y >= len(t.Lines) {
-			y = len(t.Lines) - 1
-		}
-		t.CursorLine = y
-		x := ev.X
-		if x < 0 {
-			x = 0
-		}
-		if x > len(t.Lines[t.CursorLine]) {
-			x = len(t.Lines[t.CursorLine])
-		}
-		t.CursorCol = x
-	}
-	t.rehighlight()
 }
 
 // cellPopover — cell-native modal, same shape as
