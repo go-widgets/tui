@@ -1,0 +1,244 @@
+// Copyright (c) 2026 the go-widgets/tui authors. All rights reserved.
+// Use of this source code is governed by a BSD-3-Clause license that can be
+// found in the LICENSE file at the root of this repository.
+
+package tui
+
+import (
+	"testing"
+
+	"github.com/go-widgets/painter"
+	"github.com/go-widgets/toolkit"
+)
+
+func mkPainter(w, h int) *painter.PixelPainter {
+	return painter.NewPixelPainter(make([]byte, w*h*4), w, h)
+}
+
+func key(code string) toolkit.Event  { return toolkit.Event{Kind: toolkit.EventKeyDown, Code: code} }
+func char(s string) toolkit.Event    { return toolkit.Event{Kind: toolkit.EventChar, Code: s} }
+func click(x, y int) toolkit.Event   { return toolkit.Event{Kind: toolkit.EventClick, X: x, Y: y} }
+
+func TestNewTextEditor(t *testing.T) {
+	e := NewTextEditor()
+	if len(e.Lines) != 1 || e.Lines[0] != "" {
+		t.Fatalf("Lines = %v, want one empty line", e.Lines)
+	}
+	if !e.ShowGutter {
+		t.Error("gutter should be enabled by default")
+	}
+	if e.spans == nil {
+		t.Error("spans should be initialised")
+	}
+}
+
+func TestTextEditorTextSetText(t *testing.T) {
+	e := NewTextEditor()
+	if e.Text() != "" {
+		t.Errorf("empty Text() = %q", e.Text())
+	}
+	e.SetText("a\nbb\nccc")
+	if got := e.Text(); got != "a\nbb\nccc" {
+		t.Errorf("round-trip = %q", got)
+	}
+	if len(e.Lines) != 3 || e.CursorLine != 0 || e.CursorCol != 0 {
+		t.Errorf("after SetText: lines=%d cursor=(%d,%d)", len(e.Lines), e.CursorLine, e.CursorCol)
+	}
+	e.SetText("") // empty -> one empty line
+	if len(e.Lines) != 1 || e.Lines[0] != "" {
+		t.Errorf("SetText(\"\") = %v", e.Lines)
+	}
+	// Text() with a nil buffer.
+	e.Lines = nil
+	if e.Text() != "" {
+		t.Error("nil Lines Text() should be empty")
+	}
+}
+
+func TestTextEditorLeftPad(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("x")
+	if got := e.leftPad(); got != GutterWidth(1) {
+		t.Errorf("gutter leftPad = %d, want %d", got, GutterWidth(1))
+	}
+	e.ShowGutter = false
+	if got := e.leftPad(); got != 1 {
+		t.Errorf("no-gutter leftPad = %d, want 1", got)
+	}
+}
+
+func TestTextEditorInsertAndDelete(t *testing.T) {
+	e := NewTextEditor()
+	for _, c := range []string{"h", "i"} {
+		e.OnEvent(char(c))
+	}
+	if e.Lines[0] != "hi" || e.CursorCol != 2 {
+		t.Fatalf("after typing: %q col=%d", e.Lines[0], e.CursorCol)
+	}
+	// Backspace mid-line.
+	e.OnEvent(key("Backspace"))
+	if e.Lines[0] != "h" || e.CursorCol != 1 {
+		t.Fatalf("after backspace: %q col=%d", e.Lines[0], e.CursorCol)
+	}
+	// Enter splits; Backspace at col0 joins.
+	e.CursorCol = 1
+	e.OnEvent(key("Enter"))
+	if len(e.Lines) != 2 || e.CursorLine != 1 {
+		t.Fatalf("after Enter: lines=%v cursor=%d", e.Lines, e.CursorLine)
+	}
+	e.OnEvent(key("Backspace")) // at col0, line1 -> join back
+	if len(e.Lines) != 1 || e.Lines[0] != "h" {
+		t.Fatalf("after join: %v", e.Lines)
+	}
+	// Backspace at 0,0 is a no-op.
+	e.CursorCol = 0
+	e.OnEvent(key("Backspace"))
+	if e.Lines[0] != "h" {
+		t.Errorf("backspace at 0,0 mutated: %q", e.Lines[0])
+	}
+	// EventChar with CursorCol past the line length clamps.
+	e.CursorCol = 99
+	e.OnEvent(char("!"))
+	if e.Lines[0] != "h!" {
+		t.Errorf("clamped insert = %q", e.Lines[0])
+	}
+	// Enter with CursorCol past the line length clamps in splitLine.
+	e.CursorCol = 99
+	e.OnEvent(key("Enter"))
+	if len(e.Lines) != 2 || e.Lines[0] != "h!" || e.Lines[1] != "" {
+		t.Errorf("clamped Enter split = %v", e.Lines)
+	}
+}
+
+func TestTextEditorNavigation(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("abc\nde\nf")
+	e.OnEvent(key("Down")) // ->line1
+	e.OnEvent(key("Down")) // ->line2
+	e.OnEvent(key("Down")) // at bottom, no-op
+	if e.CursorLine != 2 {
+		t.Fatalf("Down: line=%d, want 2", e.CursorLine)
+	}
+	e.CursorCol = 0
+	e.OnEvent(key("Right"))
+	if e.CursorCol != 1 {
+		t.Errorf("Right: col=%d", e.CursorCol)
+	}
+	e.OnEvent(key("Right")) // "f" len 1, at end -> no-op
+	if e.CursorCol != 1 {
+		t.Errorf("Right at end: col=%d", e.CursorCol)
+	}
+	e.OnEvent(key("Left"))
+	if e.CursorCol != 0 {
+		t.Errorf("Left: col=%d", e.CursorCol)
+	}
+	e.OnEvent(key("Left")) // at 0 -> no-op
+	// Up from line2 (col clamps: line "abc" len 3 keeps col 0).
+	e.CursorCol = 0
+	e.OnEvent(key("Up"))
+	if e.CursorLine != 1 {
+		t.Errorf("Up: line=%d", e.CursorLine)
+	}
+	e.CursorLine = 0
+	e.OnEvent(key("Up")) // at top -> no-op
+	if e.CursorLine != 0 {
+		t.Errorf("Up at top: line=%d", e.CursorLine)
+	}
+	// Up/Down that clamps a too-far column.
+	e.SetText("longline\nx")
+	e.CursorLine, e.CursorCol = 0, 8
+	e.OnEvent(key("Down")) // to "x" (len 1) -> col clamps to 1
+	if e.CursorCol != 1 {
+		t.Errorf("Down clamp col=%d, want 1", e.CursorCol)
+	}
+	e.CursorLine, e.CursorCol = 1, 1
+	e.SetText("y\nlongline")
+	e.CursorLine, e.CursorCol = 1, 8
+	e.OnEvent(key("Up")) // to "y" (len 1) -> col clamps to 1
+	if e.CursorCol != 1 {
+		t.Errorf("Up clamp col=%d, want 1", e.CursorCol)
+	}
+}
+
+func TestTextEditorClick(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("hello\nworld!")
+	pad := e.leftPad() // gutter for 2 lines
+	e.OnEvent(click(pad+3, 1))
+	if e.CursorLine != 1 || e.CursorCol != 3 {
+		t.Fatalf("click: (%d,%d), want (1,3)", e.CursorLine, e.CursorCol)
+	}
+	// Clamps: X past end, Y past last, negatives.
+	e.OnEvent(click(pad+100, 0))
+	if e.CursorCol != 5 { // len("hello")
+		t.Errorf("X clamp col=%d, want 5", e.CursorCol)
+	}
+	e.OnEvent(click(pad+1, 999))
+	if e.CursorLine != 1 {
+		t.Errorf("Y clamp line=%d, want 1", e.CursorLine)
+	}
+	e.OnEvent(click(-9, -9))
+	if e.CursorLine != 0 || e.CursorCol != 0 {
+		t.Errorf("neg clamp = (%d,%d)", e.CursorLine, e.CursorCol)
+	}
+	// Without a gutter the left pad is 1.
+	e.ShowGutter = false
+	e.OnEvent(click(1+2, 0))
+	if e.CursorCol != 2 {
+		t.Errorf("no-gutter click col=%d, want 2", e.CursorCol)
+	}
+}
+
+func TestTextEditorReadOnly(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("abc")
+	e.ReadOnly = true
+	e.CursorCol = 1
+	e.OnEvent(char("Z"))
+	e.OnEvent(key("Backspace"))
+	e.OnEvent(key("Enter"))
+	if e.Text() != "abc" || len(e.Lines) != 1 {
+		t.Fatalf("ReadOnly mutated the buffer: %q", e.Text())
+	}
+	// Navigation still works in ReadOnly.
+	e.OnEvent(key("Right"))
+	if e.CursorCol != 2 {
+		t.Errorf("ReadOnly Right col=%d, want 2", e.CursorCol)
+	}
+	e.OnEvent(click(e.leftPad()+0, 0))
+	if e.CursorCol != 0 {
+		t.Errorf("ReadOnly click col=%d, want 0", e.CursorCol)
+	}
+}
+
+func TestTextEditorOnEventEmptyBuffer(t *testing.T) {
+	e := &TextEditor{} // no Lines
+	e.OnEvent(key("Right"))
+	if len(e.Lines) != 1 {
+		t.Errorf("empty-buffer OnEvent should seed one line, got %v", e.Lines)
+	}
+}
+
+func TestTextEditorDraw(t *testing.T) {
+	e := NewTextEditor()
+	e.Filename = "x.go"
+	e.SetText("package main\nfunc f() {}\nvar x = 1")
+	e.Focused = true
+	e.CursorLine, e.CursorCol = 1, 2
+	// Gutter on, H < line count -> exercises gutter + overflow break + caret.
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 2})
+	e.Draw(mkPainter(40, 2), toolkit.DefaultLight())
+	e.Draw(mkPainter(40, 2), toolkit.DefaultDark())
+	// Gutter off.
+	e.ShowGutter = false
+	e.Draw(mkPainter(40, 2), toolkit.DefaultLight())
+	// Caret guards: past visible width, row out of view, not focused.
+	e.ShowGutter = true
+	e.CursorCol = 100
+	e.Draw(mkPainter(40, 2), toolkit.DefaultLight())
+	e.CursorLine = 9
+	e.Draw(mkPainter(40, 2), toolkit.DefaultLight())
+	e.Focused = false
+	e.CursorLine = 0
+	e.Draw(mkPainter(40, 2), toolkit.DefaultLight())
+}
