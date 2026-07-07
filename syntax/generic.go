@@ -10,12 +10,23 @@ package syntax
 // grammar. Go keeps its own go/scanner path; these cover the common C-family +
 // scripting languages.
 type langSpec struct {
-	keywords    map[string]bool
-	types       map[string]bool
-	lineComment string // e.g. "//" or "#"; "" = none
-	blockOpen   string // e.g. "/*"; "" = no block comments
-	blockClose  string // e.g. "*/"
-	backtick    bool   // supports `...` (template) strings
+	keywords     map[string]bool
+	types        map[string]bool
+	lineComments []string // e.g. {"//"} or {"#", "//"}; nil = none
+	blockOpen    string   // e.g. "/*"; "" = no block comments
+	blockClose   string   // e.g. "*/"
+	backtick     bool     // supports `...` (template) strings
+}
+
+// matchesLineComment reports whether any of the spec's line-comment markers
+// starts at src[i].
+func matchesLineComment(spec *langSpec, src string, i int) bool {
+	for _, lc := range spec.lineComments {
+		if hasPrefixAt(src, i, lc) {
+			return true
+		}
+	}
+	return false
 }
 
 func set(words ...string) map[string]bool {
@@ -37,7 +48,7 @@ var (
 			"yield", "let", "static", "async", "await", "of", "true", "false", "null",
 			"undefined"),
 		types:       set("string", "number", "boolean", "object", "symbol", "bigint", "any", "unknown", "never", "void"),
-		lineComment: "//", blockOpen: "/*", blockClose: "*/", backtick: true,
+		lineComments: []string{"//"}, blockOpen: "/*", blockClose: "*/", backtick: true,
 	}
 	pySpec = &langSpec{
 		keywords: set("False", "None", "True", "and", "as", "assert", "async", "await",
@@ -46,7 +57,7 @@ var (
 			"nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with",
 			"yield", "match", "case"),
 		types:       set("int", "float", "str", "bool", "bytes", "list", "dict", "set", "tuple", "complex"),
-		lineComment: "#",
+		lineComments: []string{"#"},
 	}
 	rubySpec = &langSpec{
 		keywords: set("begin", "break", "case", "class", "def", "do", "else", "elsif",
@@ -54,13 +65,13 @@ var (
 			"or", "and", "redo", "rescue", "retry", "return", "self", "super", "then",
 			"true", "unless", "until", "when", "while", "yield", "require", "attr_accessor",
 			"attr_reader", "attr_writer", "puts", "lambda", "proc"),
-		lineComment: "#",
+		lineComments: []string{"#"},
 	}
 	shellSpec = &langSpec{
 		keywords: set("if", "then", "else", "elif", "fi", "case", "esac", "for", "while",
 			"until", "do", "done", "in", "function", "select", "time", "return", "exit",
 			"export", "local", "readonly", "declare", "set", "unset", "echo", "cd", "source"),
-		lineComment: "#",
+		lineComments: []string{"#"},
 	}
 	cSpec = &langSpec{
 		keywords: set("auto", "break", "case", "const", "continue", "default", "do",
@@ -71,7 +82,7 @@ var (
 		types: set("bool", "char", "double", "float", "int", "long", "short", "signed",
 			"unsigned", "void", "size_t", "int8_t", "int16_t", "int32_t", "int64_t",
 			"uint8_t", "uint16_t", "uint32_t", "uint64_t"),
-		lineComment: "//", blockOpen: "/*", blockClose: "*/",
+		lineComments: []string{"//"}, blockOpen: "/*", blockClose: "*/",
 	}
 	rustSpec = &langSpec{
 		keywords: set("as", "async", "await", "break", "const", "continue", "crate",
@@ -82,10 +93,19 @@ var (
 		types: set("bool", "char", "str", "String", "i8", "i16", "i32", "i64", "i128",
 			"isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "Vec",
 			"Option", "Result", "Box"),
-		lineComment: "//", blockOpen: "/*", blockClose: "*/",
+		lineComments: []string{"//"}, blockOpen: "/*", blockClose: "*/",
 	}
 	jsonSpec = &langSpec{
 		keywords: set("true", "false", "null"),
+	}
+	// HCL (Terraform / pkgx / libhcl): # and // line comments, /* */ blocks,
+	// "..." strings, numbers, a few literal keywords + directive words. Blocks
+	// (resource "x" {}) read as identifiers -> a call before "(" or a bare
+	// ident; that is fine for a preview.
+	hclSpec = &langSpec{
+		keywords:     set("true", "false", "null", "for", "in", "if", "endif", "else", "endfor"),
+		lineComments: []string{"#", "//"},
+		blockOpen:    "/*", blockClose: "*/",
 	}
 )
 
@@ -99,6 +119,7 @@ var specs = map[string]*langSpec{
 	"c":          cSpec,
 	"rust":       rustSpec,
 	"json":       jsonSpec,
+	"hcl":        hclSpec,
 }
 
 // tokenizeGeneric lexes src per spec into a flat span list (Text may contain
@@ -114,7 +135,7 @@ func tokenizeGeneric(src string, spec *langSpec) []Span {
 	for i < n {
 		c := src[i]
 		switch {
-		case spec.lineComment != "" && hasPrefixAt(src, i, spec.lineComment):
+		case matchesLineComment(spec, src, i):
 			j := i
 			for j < n && src[j] != '\n' {
 				j++

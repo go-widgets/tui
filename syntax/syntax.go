@@ -58,6 +58,12 @@ func Highlight(code, filename string) [][]Span {
 		return highlightGo(code)
 	case "markdown":
 		return highlightMarkdown(code)
+	case "yaml":
+		return highlightYAML(code)
+	case "toml":
+		return highlightTOML(code)
+	case "latex":
+		return highlightLatex(code)
 	default:
 		if spec, ok := specs[id]; ok {
 			return splitLines(tokenizeGeneric(code, spec))
@@ -89,6 +95,14 @@ func lang(filename string) string {
 		return "rust"
 	case ".json":
 		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".toml":
+		return "toml"
+	case ".hcl", ".tf", ".tfvars":
+		return "hcl"
+	case ".tex", ".latex", ".sty", ".cls":
+		return "latex"
 	default:
 		return "plain"
 	}
