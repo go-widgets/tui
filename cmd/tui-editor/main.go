@@ -117,19 +117,19 @@ const (
 // handlers can address them by field name without threading a
 // container tree through every call.
 type state struct {
-	mode        mode
-	file        string // "" == unnamed buffer
-	dirty       bool
-	tv          *cellTextEdit
-	statusbar   *toolkit.Label
-	menuBar     *menuBar
-	palette     *cellPopover
-	paletteEn   *toolkit.SearchEntry
-	filePopover *cellPopover
-	editPopover *cellPopover
-	viewPopover *cellPopover
-	helpPopover *cellPopover
-	root        toolkit.Widget
+	mode         mode
+	file         string // "" == unnamed buffer
+	dirty        bool
+	tv           *cellTextEdit
+	statusbar    *toolkit.Label
+	menuBar      *menuBar
+	palette      *cellPopover
+	paletteEn    *toolkit.SearchEntry
+	fileDropdown *menuDropdown
+	editDropdown *menuDropdown
+	viewDropdown *menuDropdown
+	helpDropdown *menuDropdown
+	root         toolkit.Widget
 
 	// I/O seams so tests exercise load/save without hitting the real
 	// filesystem.
@@ -211,39 +211,67 @@ func newState() *state {
 		Body:  []string{}, // populated when the user types via paletteEn
 	}
 
-	filePopover := &cellPopover{
-		Title: "File",
-		Body:  []string{"New       (stub)", "Open      (stub)", "Save      (stub)", "Quit      q"},
+	fileDropdown := &menuDropdown{
+		Title:   "File",
+		Body:    []string{"New       (stub)", "Open      (stub)", "Save      Ctrl+S", "Quit      q"},
+		AnchorY: 1,
 	}
-	editPopover := &cellPopover{
-		Title: "Edit",
-		Body:  []string{"Undo      (stub)", "Redo      (stub)", "Cut       (stub)", "Copy      (stub)", "Paste     (stub)"},
+	editDropdown := &menuDropdown{
+		Title:   "Edit",
+		Body:    []string{"Undo   (stub)", "Redo   (stub)", "Cut    (stub)", "Copy   (stub)", "Paste  (stub)"},
+		AnchorY: 1,
 	}
-	viewPopover := &cellPopover{
-		Title: "View",
-		Body:  []string{"Toggle line numbers  (stub)", "Focus editor         i", "Command palette      Ctrl+P"},
+	viewDropdown := &menuDropdown{
+		Title:   "View",
+		Body:    []string{"Toggle line numbers  (stub)", "Focus editor         i", "Command palette      Ctrl+P"},
+		AnchorY: 1,
 	}
-	helpPopover := &cellPopover{
+	helpDropdown := &menuDropdown{
 		Title: "Help",
 		Body: []string{
-			"i          Insert mode",
-			"Esc        View mode",
-			"Ctrl+P     Command palette",
-			"Ctrl+S     Save",
-			"q          Quit (view mode)",
-			"",
-			"Mouse:",
-			"click text  Move cursor",
-			"click menu  Toggle dropdown",
+			"i           Insert mode",
+			"Esc         View mode",
+			"Ctrl+P      Palette",
+			"Ctrl+S      Save",
+			"q           Quit (view)",
 		},
+		AnchorY: 1,
 	}
 
-	mb := &menuBar{Items: []menuItem{
-		{Label: "File", OnClick: func() { filePopover.Visible = !filePopover.Visible }},
-		{Label: "Edit", OnClick: func() { editPopover.Visible = !editPopover.Visible }},
-		{Label: "View", OnClick: func() { viewPopover.Visible = !viewPopover.Visible }},
-		{Label: "Help", OnClick: func() { helpPopover.Visible = !helpPopover.Visible }},
-	}}
+	mb := &menuBar{}
+	closeOthers := func(keep *menuDropdown) {
+		for _, d := range []*menuDropdown{fileDropdown, editDropdown, viewDropdown, helpDropdown} {
+			if d != keep {
+				d.Visible = false
+			}
+		}
+	}
+	mb.Items = []menuItem{
+		{Label: "File", OnClick: func() {
+			x0, _ := mb.itemXRange(0)
+			fileDropdown.AnchorX = x0
+			fileDropdown.Visible = !fileDropdown.Visible
+			closeOthers(fileDropdown)
+		}},
+		{Label: "Edit", OnClick: func() {
+			x0, _ := mb.itemXRange(1)
+			editDropdown.AnchorX = x0
+			editDropdown.Visible = !editDropdown.Visible
+			closeOthers(editDropdown)
+		}},
+		{Label: "View", OnClick: func() {
+			x0, _ := mb.itemXRange(2)
+			viewDropdown.AnchorX = x0
+			viewDropdown.Visible = !viewDropdown.Visible
+			closeOthers(viewDropdown)
+		}},
+		{Label: "Help", OnClick: func() {
+			x0, _ := mb.itemXRange(3)
+			helpDropdown.AnchorX = x0
+			helpDropdown.Visible = !helpDropdown.Visible
+			closeOthers(helpDropdown)
+		}},
+	}
 
 	body := tv
 
@@ -253,23 +281,23 @@ func newState() *state {
 		footer:   statusbar,
 		headerH:  1,
 		footerH:  1,
-		overlays: []toolkit.Widget{palette, filePopover, editPopover, viewPopover, helpPopover},
+		overlays: []toolkit.Widget{palette, fileDropdown, editDropdown, viewDropdown, helpDropdown},
 	}
 
 	return &state{
-		mode:        modeView,
-		tv:          tv,
-		statusbar:   statusbar,
-		menuBar:     mb,
-		palette:     palette,
-		paletteEn:   paletteEn,
-		filePopover: filePopover,
-		editPopover: editPopover,
-		viewPopover: viewPopover,
-		helpPopover: helpPopover,
-		root:        root,
-		readFile:    os.ReadFile,
-		writeFile:   os.WriteFile,
+		mode:         modeView,
+		tv:           tv,
+		statusbar:    statusbar,
+		menuBar:      mb,
+		palette:      palette,
+		paletteEn:    paletteEn,
+		fileDropdown: fileDropdown,
+		editDropdown: editDropdown,
+		viewDropdown: viewDropdown,
+		helpDropdown: helpDropdown,
+		root:         root,
+		readFile:     os.ReadFile,
+		writeFile:    os.WriteFile,
 	}
 }
 
@@ -445,6 +473,15 @@ type cellPopover struct {
 	Visible bool
 }
 
+// HitTest — invisible popovers must not claim clicks. Same rationale
+// as tui-explorer's cellPopover.
+func (p *cellPopover) HitTest(px, py int) bool {
+	if !p.Visible {
+		return false
+	}
+	return p.Base.HitTest(px, py)
+}
+
 func (p *cellPopover) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	if !p.Visible {
 		return
@@ -468,6 +505,71 @@ func (p *cellPopover) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 			break
 		}
 		toolkit.DrawText(pnt, r.X+2, y, line, ink)
+	}
+}
+
+// menuDropdown — anchored menu-item popover. Same shape as
+// tui-explorer's helper. See its docstring for the rationale.
+type menuDropdown struct {
+	toolkit.Base
+	Title   string
+	Body    []string
+	Visible bool
+	AnchorX int
+	AnchorY int
+}
+
+func (d *menuDropdown) size() (int, int) {
+	w := len(d.Title)
+	for _, line := range d.Body {
+		if l := len(line); l > w {
+			w = l
+		}
+	}
+	w += 4
+	h := 2 + len(d.Body)
+	if h < 3 {
+		h = 3
+	}
+	return w, h
+}
+
+func (d *menuDropdown) SetBounds(_ toolkit.Rect) {
+	w, h := d.size()
+	d.Base.SetBounds(toolkit.Rect{X: d.AnchorX, Y: d.AnchorY, W: w, H: h})
+}
+
+func (d *menuDropdown) HitTest(px, py int) bool {
+	if !d.Visible {
+		return false
+	}
+	return d.Base.HitTest(px, py)
+}
+
+func (d *menuDropdown) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	if !d.Visible {
+		return
+	}
+	d.SetBounds(toolkit.Rect{})
+	r := d.Bounds()
+	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
+	})
+	pnt.StrokeRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.Border.R, G: theme.Border.G, B: theme.Border.B, A: theme.Border.A,
+	}, 1)
+	ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
+	if d.Title != "" {
+		toolkit.DrawText(pnt, r.X+2, r.Y, d.Title, ink)
+	}
+	for i, line := range d.Body {
+		toolkit.DrawText(pnt, r.X+2, r.Y+1+i, line, ink)
+	}
+}
+
+func (d *menuDropdown) OnEvent(ev toolkit.Event) {
+	if ev.Kind == toolkit.EventClick {
+		d.Visible = false
 	}
 }
 
@@ -553,26 +655,22 @@ func (p *packedVBox) OnEvent(ev toolkit.Event) {
 	if ev.Kind == toolkit.EventClick {
 		// ev.X/Y are widget-local to packedVBox; route by Y band.
 		r := p.Bounds()
-		for _, o := range p.overlays {
-			if v, ok := o.(*cellPopover); ok && !v.Visible {
+		// Overlays hit-test via each widget's HitTest so anchored
+		// dropdowns and invisible popovers are handled correctly.
+		// Iterate in reverse so later-added overlays (which paint on
+		// top) also claim clicks first.
+		for i := len(p.overlays) - 1; i >= 0; i-- {
+			o := p.overlays[i]
+			if !o.HitTest(ev.X, ev.Y) {
 				continue
 			}
-			ox, oy := 4, p.headerH+2
-			ow, oh := r.W-8, r.H-p.headerH-p.footerH-4
-			if ow < 1 {
-				ow = 1
-			}
-			if oh < 1 {
-				oh = 1
-			}
-			if ev.X >= ox && ev.X < ox+ow && ev.Y >= oy && ev.Y < oy+oh {
-				child := ev
-				child.X -= ox
-				child.Y -= oy
-				o.OnEvent(child)
-				p.dragTarget, p.dragDx, p.dragDy = o, ox, oy
-				return
-			}
+			ob := o.Bounds()
+			child := ev
+			child.X -= ob.X
+			child.Y -= ob.Y
+			o.OnEvent(child)
+			p.dragTarget, p.dragDx, p.dragDy = o, ob.X, ob.Y
+			return
 		}
 		switch {
 		case ev.Y < p.headerH:

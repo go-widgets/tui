@@ -92,8 +92,9 @@ type state struct {
 	menuBar       *menuBar
 	helpPopover   *cellPopover
 	searchPopover *cellPopover
-	filePopover   *cellPopover
-	viewPopover   *cellPopover
+	fileDropdown  *menuDropdown
+	viewDropdown  *menuDropdown
+	helpDropdown  *menuDropdown
 	root          *packedVBox
 	files         map[string]string
 	paths         []string // flat, order-stable list of file paths for fileList indexing
@@ -174,6 +175,105 @@ type cellPopover struct {
 	Visible bool
 }
 
+// HitTest — an invisible popover must not claim clicks, otherwise
+// packedVBox routing would short-circuit every body click into the
+// popover's OnEvent (a no-op) and the underlying content would stop
+// receiving input. Base.HitTest is bounds-only; we AND with Visible.
+func (p *cellPopover) HitTest(px, py int) bool {
+	if !p.Visible {
+		return false
+	}
+	return p.Base.HitTest(px, py)
+}
+
+// menuDropdown is an anchored variant of cellPopover — used for menu
+// bar dropdowns that need to appear directly below the clicked menu
+// item, not centred in the body inset. It computes its own bounds
+// from AnchorX/AnchorY plus the natural size of its content.
+//
+// Compared to cellPopover:
+//   - No 4-cell inset from container edges
+//   - Anchor point is (AnchorX, AnchorY), typically (item.x0, headerH)
+//   - Width auto-fits max(Title, longest body line) + 4 padding
+//   - Height = 2 border rows + len(Body)
+//   - Clicking anywhere on it closes it (dismisses without action)
+type menuDropdown struct {
+	toolkit.Base
+	Title   string
+	Body    []string
+	Visible bool
+	AnchorX int
+	AnchorY int
+}
+
+func (d *menuDropdown) size() (int, int) {
+	w := len(d.Title)
+	for _, line := range d.Body {
+		if l := len(line); l > w {
+			w = l
+		}
+	}
+	w += 4 // 1-cell border each side + 1-cell text padding each side
+	h := 2 + len(d.Body)
+	if h < 3 {
+		h = 3
+	}
+	return w, h
+}
+
+// SetBounds ignores the parent's requested rect and self-positions
+// at (AnchorX, AnchorY) with the natural size. packedVBox calls this
+// during layout; the dropdown ignores the "centred inset" it would
+// otherwise receive.
+func (d *menuDropdown) SetBounds(_ toolkit.Rect) {
+	w, h := d.size()
+	d.Base.SetBounds(toolkit.Rect{X: d.AnchorX, Y: d.AnchorY, W: w, H: h})
+}
+
+func (d *menuDropdown) HitTest(px, py int) bool {
+	if !d.Visible {
+		return false
+	}
+	return d.Base.HitTest(px, py)
+}
+
+func (d *menuDropdown) Draw(pnt painter.Painter, theme *toolkit.Theme) {
+	if !d.Visible {
+		return
+	}
+	// Refresh bounds from the current AnchorX/AnchorY. menuBar
+	// updates the anchor right before flipping Visible, but SetBounds
+	// only runs at layout time (once at startup), so without this the
+	// dropdown would draw at the anchor it had when packedVBox last
+	// laid out — usually (0, 0).
+	d.SetBounds(toolkit.Rect{})
+	r := d.Bounds()
+	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.SurfaceAlt.R, G: theme.SurfaceAlt.G, B: theme.SurfaceAlt.B, A: theme.SurfaceAlt.A,
+	})
+	pnt.StrokeRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
+		R: theme.Border.R, G: theme.Border.G, B: theme.Border.B, A: theme.Border.A,
+	}, 1)
+	ink := toolkit.RGBA{R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A}
+	if d.Title != "" {
+		toolkit.DrawText(pnt, r.X+2, r.Y, d.Title, ink)
+	}
+	// SetBounds sizes r.H = 2 + len(Body), so every body line has a
+	// row inside the box — no per-line clip guard needed.
+	for i, line := range d.Body {
+		toolkit.DrawText(pnt, r.X+2, r.Y+1+i, line, ink)
+	}
+}
+
+// OnEvent — click anywhere on the dropdown closes it. This mirrors
+// standard menu UX where a click either activates a highlighted
+// item or dismisses the menu.
+func (d *menuDropdown) OnEvent(ev toolkit.Event) {
+	if ev.Kind == toolkit.EventClick {
+		d.Visible = false
+	}
+}
+
 func (p *cellPopover) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	if !p.Visible {
 		return
@@ -248,7 +348,7 @@ func newState() *state {
 			"Mouse:",
 			"click file  Select + preview",
 			"drag grip   Resize sidebar",
-			"click menu  Toggle dropdown",
+			"click menu  Open dropdown",
 		},
 	}
 	searchPopover := &cellPopover{
@@ -258,29 +358,55 @@ func newState() *state {
 			"finder is planned for v0.4)",
 		},
 	}
-	filePopover := &cellPopover{
-		Title: "File",
-		Body: []string{
-			"New       (stub)",
-			"Open      (stub)",
-			"Reload    (stub)",
-			"Quit      q",
-		},
+	// Anchored dropdowns sit directly below the menu item. AnchorY=1
+	// (headerH), AnchorX is patched in by menuBar.itemXRange when the
+	// item is clicked so the dropdown lines up with its label.
+	fileDropdown := &menuDropdown{
+		Title:   "File",
+		Body:    []string{"New       (stub)", "Open      (stub)", "Reload    (stub)", "Quit      q"},
+		AnchorY: 1,
 	}
-	viewPopover := &cellPopover{
-		Title: "View",
+	viewDropdown := &menuDropdown{
+		Title:   "View",
+		Body:    []string{"Toggle sidebar  (drag grip)", "Focus preview   Enter", "Refresh         Enter"},
+		AnchorY: 1,
+	}
+	helpDropdown := &menuDropdown{
+		Title: "Help",
 		Body: []string{
-			"Toggle sidebar  (drag grip)",
-			"Focus preview   Enter",
-			"Refresh         Enter",
+			"click file  Select + preview",
+			"drag grip   Resize sidebar",
+			"?           Full help modal",
+			"q           Quit",
 		},
+		AnchorY: 1,
 	}
 
-	mb := &menuBar{Items: []menuItem{
-		{Label: "File", OnClick: func() { filePopover.Visible = !filePopover.Visible }},
-		{Label: "View", OnClick: func() { viewPopover.Visible = !viewPopover.Visible }},
-		{Label: "Help", OnClick: func() { helpPopover.Visible = !helpPopover.Visible }},
-	}}
+	mb := &menuBar{}
+	mb.Items = []menuItem{
+		{Label: "File", OnClick: func() {
+			x0, _ := mb.itemXRange(0)
+			fileDropdown.AnchorX = x0
+			fileDropdown.Visible = !fileDropdown.Visible
+			// Close the other dropdowns so only one is open at a time.
+			viewDropdown.Visible = false
+			helpDropdown.Visible = false
+		}},
+		{Label: "View", OnClick: func() {
+			x0, _ := mb.itemXRange(1)
+			viewDropdown.AnchorX = x0
+			viewDropdown.Visible = !viewDropdown.Visible
+			fileDropdown.Visible = false
+			helpDropdown.Visible = false
+		}},
+		{Label: "Help", OnClick: func() {
+			x0, _ := mb.itemXRange(2)
+			helpDropdown.AnchorX = x0
+			helpDropdown.Visible = !helpDropdown.Visible
+			fileDropdown.Visible = false
+			viewDropdown.Visible = false
+		}},
+	}
 
 	pv := &packedVBox{
 		header:   mb,
@@ -288,7 +414,7 @@ func newState() *state {
 		footer:   status,
 		headerH:  1,
 		footerH:  1,
-		overlays: []toolkit.Widget{helpPopover, searchPopover, filePopover, viewPopover},
+		overlays: []toolkit.Widget{helpPopover, searchPopover, fileDropdown, viewDropdown, helpDropdown},
 	}
 
 	s := &state{
@@ -298,8 +424,9 @@ func newState() *state {
 		menuBar:       mb,
 		helpPopover:   helpPopover,
 		searchPopover: searchPopover,
-		filePopover:   filePopover,
-		viewPopover:   viewPopover,
+		fileDropdown:  fileDropdown,
+		viewDropdown:  viewDropdown,
+		helpDropdown:  helpDropdown,
 		root:          pv,
 		files:         files,
 		paths:         paths,
@@ -694,31 +821,25 @@ func (p *packedVBox) OnEvent(ev toolkit.Event) {
 		//   body   at Y ∈ [headerH, H - footerH)
 		//   footer at Y ∈ [H - footerH, H)
 		r := p.Bounds()
-		// Overlays sit on top of the body area with the same 4-cell
-		// inset used by SetBounds. Check them first (top-most wins).
-		// Invisible popovers must be skipped — otherwise they'd claim
-		// clicks in their bounds region even when not drawn, silently
-		// swallowing every body click.
-		for _, o := range p.overlays {
-			if v, ok := o.(*cellPopover); ok && !v.Visible {
+		// Overlays sit on top of the body area with per-widget bounds.
+		// Delegated to each widget's HitTest so invisible cellPopover
+		// / menuDropdown overlays (which override HitTest to return
+		// false when !Visible) get skipped, and anchored dropdowns
+		// with non-inset bounds get correctly targeted. Iterate in
+		// reverse — later-added overlays paint on top so they should
+		// also claim clicks first when overlapping.
+		for i := len(p.overlays) - 1; i >= 0; i-- {
+			o := p.overlays[i]
+			if !o.HitTest(ev.X, ev.Y) {
 				continue
 			}
-			ox, oy := 4, p.headerH+2
-			ow, oh := r.W-8, r.H-p.headerH-p.footerH-4
-			if ow < 1 {
-				ow = 1
-			}
-			if oh < 1 {
-				oh = 1
-			}
-			if ev.X >= ox && ev.X < ox+ow && ev.Y >= oy && ev.Y < oy+oh {
-				child := ev
-				child.X -= ox
-				child.Y -= oy
-				o.OnEvent(child)
-				p.dragTarget, p.dragDx, p.dragDy = o, ox, oy
-				return
-			}
+			ob := o.Bounds()
+			child := ev
+			child.X -= ob.X
+			child.Y -= ob.Y
+			o.OnEvent(child)
+			p.dragTarget, p.dragDx, p.dragDy = o, ob.X, ob.Y
+			return
 		}
 		switch {
 		case ev.Y < p.headerH:

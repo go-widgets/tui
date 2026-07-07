@@ -146,6 +146,60 @@ func buildBinary(t *testing.T) string {
 	return bin
 }
 
+// -----------------------------------------------------------------
+// v0.3.13 anchored menu-dropdown click
+// -----------------------------------------------------------------
+
+// TestEditorClickOnFileMenuOpensAnchoredDropdown — clicking on the
+// "File" item in the menu bar opens a compact dropdown positioned
+// directly under it (X=1, Y=1).
+func TestEditorClickOnFileMenuOpensAnchoredDropdown(t *testing.T) {
+	bin := buildBinary(t)
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, ptmx); close(done) }()
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		// menuBar items: File Edit View Help. "File" occupies local
+		// X ∈ [1, 5). Wire X=3 = local X=2 → hits "File".
+		_, _ = ptmx.Write([]byte("\x1b[<0;3;1M")) // click File
+		time.Sleep(200 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("q"))
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("binary did not exit within timeout")
+	}
+	_ = c.Wait()
+
+	g := tui.DecodeANSI(buf.Bytes(), 80, 30)
+	// Dropdown title "File" is on row 1 (AnchorY=1). Dropdown box
+	// has a top-left corner glyph ┌ at col 1 (AnchorX=1).
+	if !strings.Contains(g.RowText(1), "File") {
+		t.Errorf("row 1 missing 'File' title: %q", g.RowText(1))
+	}
+	if c := g.At(1, 1).Rune; c != '┌' && c != '│' {
+		t.Errorf("dropdown top-left at (1,1) = %c, want ┌ or │", c)
+	}
+	// Body should contain a "Quit" line.
+	joined := ""
+	for y := 1; y < 8; y++ {
+		joined += g.RowText(y) + " | "
+	}
+	if !strings.Contains(joined, "Quit") {
+		t.Errorf("dropdown body missing 'Quit': %q", joined)
+	}
+}
+
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
 func stripANSI(b []byte) string { return ansiRE.ReplaceAllString(string(b), "") }

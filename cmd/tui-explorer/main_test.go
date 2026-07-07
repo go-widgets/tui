@@ -432,10 +432,10 @@ func TestMenuBarClickFiresOnClick(t *testing.T) {
 	}
 }
 
-// TestNewStateWiresMenuItemsToPopovers verifies each menu item's
-// OnClick toggles the matching popover — covers the closures inside
-// newState() that would otherwise stay at 0%.
-func TestNewStateWiresMenuItemsToPopovers(t *testing.T) {
+// TestNewStateWiresMenuItemsToDropdowns verifies each menu item's
+// OnClick anchors + toggles the matching dropdown, and that opening
+// one closes any other that was open.
+func TestNewStateWiresMenuItemsToDropdowns(t *testing.T) {
 	s := newState()
 	// menuBar items: File / View / Help — in that order.
 	if len(s.menuBar.Items) != 3 {
@@ -444,24 +444,122 @@ func TestNewStateWiresMenuItemsToPopovers(t *testing.T) {
 	cases := []struct {
 		idx  int
 		name string
-		pop  **cellPopover
+		d    **menuDropdown
 	}{
-		{0, "File", &s.filePopover},
-		{1, "View", &s.viewPopover},
-		{2, "Help", &s.helpPopover},
+		{0, "File", &s.fileDropdown},
+		{1, "View", &s.viewDropdown},
+		{2, "Help", &s.helpDropdown},
 	}
 	for _, tc := range cases {
-		if (*tc.pop).Visible {
-			t.Fatalf("%s popover starts visible", tc.name)
+		if (*tc.d).Visible {
+			t.Fatalf("%s dropdown starts visible", tc.name)
 		}
 		s.menuBar.Items[tc.idx].OnClick()
-		if !(*tc.pop).Visible {
-			t.Errorf("%s.OnClick() did not open its popover", tc.name)
+		wantX, _ := s.menuBar.itemXRange(tc.idx)
+		if (*tc.d).AnchorX != wantX {
+			t.Errorf("%s AnchorX = %d, want %d", tc.name, (*tc.d).AnchorX, wantX)
+		}
+		if !(*tc.d).Visible {
+			t.Errorf("%s.OnClick() did not open its dropdown", tc.name)
 		}
 		s.menuBar.Items[tc.idx].OnClick()
-		if (*tc.pop).Visible {
-			t.Errorf("%s.OnClick() second call did not close its popover", tc.name)
+		if (*tc.d).Visible {
+			t.Errorf("%s.OnClick() second call did not close its dropdown", tc.name)
 		}
+	}
+	// Opening one closes the others (mutual exclusion).
+	s.fileDropdown.Visible = true
+	s.viewDropdown.Visible = true
+	s.menuBar.Items[2].OnClick() // Help
+	if s.fileDropdown.Visible || s.viewDropdown.Visible {
+		t.Errorf("opening Help did not close file/view dropdowns")
+	}
+	if !s.helpDropdown.Visible {
+		t.Errorf("Help dropdown did not open")
+	}
+}
+
+// -----------------------------------------------------------------
+// menuDropdown
+// -----------------------------------------------------------------
+
+func TestMenuDropdownSizeAutoFitsBody(t *testing.T) {
+	d := &menuDropdown{Title: "F", Body: []string{"aaaaaa", "bb"}}
+	w, h := d.size()
+	// max("F"=1, "aaaaaa"=6, "bb"=2) = 6, +4 padding = 10.
+	// h = 2 + len(Body) = 4.
+	if w != 10 || h != 4 {
+		t.Errorf("size = (%d, %d), want (10, 4)", w, h)
+	}
+	// Minimum height guard: empty body → h=3.
+	e := &menuDropdown{Title: "X"}
+	_, h = e.size()
+	if h != 3 {
+		t.Errorf("empty-body height = %d, want 3", h)
+	}
+}
+
+func TestMenuDropdownSetBoundsIgnoresParentAndAnchors(t *testing.T) {
+	d := &menuDropdown{Title: "T", Body: []string{"x"}, AnchorX: 12, AnchorY: 1}
+	d.SetBounds(toolkit.Rect{X: 99, Y: 99, W: 99, H: 99}) // parent's request — must be ignored
+	got := d.Bounds()
+	if got.X != 12 || got.Y != 1 {
+		t.Errorf("anchor = (%d, %d), want (12, 1)", got.X, got.Y)
+	}
+	// Width = max(len("T"), len("x")) + 4 = 5.
+	if got.W != 5 {
+		t.Errorf("W = %d, want 5", got.W)
+	}
+}
+
+func TestMenuDropdownHitTestReflectsVisibility(t *testing.T) {
+	d := &menuDropdown{Title: "T", Body: []string{"x"}, AnchorX: 0, AnchorY: 0}
+	d.SetBounds(toolkit.Rect{})
+	// Invisible: no hit.
+	if d.HitTest(1, 1) {
+		t.Error("invisible dropdown claimed a hit")
+	}
+	// Visible: hit inside bounds.
+	d.Visible = true
+	if !d.HitTest(1, 1) {
+		t.Error("visible dropdown missed a hit inside bounds")
+	}
+	// Visible: miss outside bounds.
+	if d.HitTest(1000, 1000) {
+		t.Error("visible dropdown claimed a hit outside bounds")
+	}
+}
+
+func TestMenuDropdownDrawInvisibleIsNoop(t *testing.T) {
+	d := &menuDropdown{Title: "T", Body: []string{"x"}, Visible: false, AnchorX: 0, AnchorY: 0}
+	d.SetBounds(toolkit.Rect{})
+	pnt := painter.NewPixelPainter(make([]byte, 20*10*4), 20, 10)
+	d.Draw(pnt, toolkit.DefaultLight())
+}
+
+func TestMenuDropdownDrawVisibleRendersTitleAndBody(t *testing.T) {
+	d := &menuDropdown{
+		Title: "T", Body: []string{"one", "two"},
+		Visible: true, AnchorX: 0, AnchorY: 0,
+	}
+	pnt := painter.NewPixelPainter(make([]byte, 20*10*4), 20, 10)
+	d.Draw(pnt, toolkit.DefaultLight())
+	// Empty title → title-draw branch skipped, body still paints.
+	e := &menuDropdown{Body: []string{"only body"}, Visible: true}
+	e.Draw(pnt, toolkit.DefaultLight())
+}
+
+func TestMenuDropdownOnEventClickCloses(t *testing.T) {
+	d := &menuDropdown{Visible: true}
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 1})
+	if d.Visible {
+		t.Error("click did not close dropdown")
+	}
+	// Non-click event ignored.
+	d.Visible = true
+	d.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
+	if !d.Visible {
+		t.Error("keydown incorrectly closed dropdown")
 	}
 }
 

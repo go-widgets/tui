@@ -330,36 +330,46 @@ func TestExplorerBodyChromeContrastIsPerceptible(t *testing.T) {
 // v0.3.12 menuBar clicks + hSplit grip drag
 // -----------------------------------------------------------------
 
-// TestExplorerClickOnHelpMenuOpensHelpPopover — a click on the "Help"
-// item in the menuBar toggles the same popover the `?` key does.
-func TestExplorerClickOnHelpMenuOpensHelpPopover(t *testing.T) {
-	// menuBar layout: " File   View   Help" with menuBarPad=1 and
-	// menuBarSep=3. "Help" occupies local X ∈ [15, 19). On the wire
-	// SGR coords are 1-indexed, so X=17 on wire = local X=16.
+// TestExplorerClickOnHelpMenuAnchoredBelowItem — a click on "Help"
+// in the menuBar opens the anchored dropdown right below the item.
+// "Help" is menu item 2 with X range [15, 19) (padding 1 + 4+3+4+3),
+// so the dropdown anchors at X=15 and Y=1 (right below header row 0).
+func TestExplorerClickOnHelpMenuAnchoredBelowItem(t *testing.T) {
+	// Wire coords 1-indexed → click on local X=16 (inside [15,19)).
+	// Terminal row 2 = decoded Y=1 = header row 0 on wire = X for
+	// menuItem hit. Wire row 1 = decoded row 0 (header).
 	keys := [][]byte{
-		sgrMousePress(17, 1), // click "Help" in menu row (wire row 1)
+		sgrMousePress(17, 1), // click "Help"
 		[]byte("q"),
 	}
 	g := captureFrameWithBytes(t, 80, 30, keys, 5*time.Second)
-	// The popover Draw places title at overlay-local Y+1. Overlay
-	// bounds start at row = headerH+2 = 3, so title lands on row 4.
-	// Search a small band around it in case the title's exact row
-	// shifts across cellPopover revisions.
-	foundTitle := false
-	foundBody := false
-	for y := 3; y < 30; y++ {
-		if strings.Contains(g.RowText(y), "Help") {
-			foundTitle = true
-		}
-		if strings.Contains(g.RowText(y), "Quit") {
-			foundBody = true
+	// Dropdown top border is at row 1, title on row 1, body starts at row 2.
+	// Row 1 must show "Help" title inside the box border.
+	if !strings.Contains(g.RowText(1), "Help") {
+		t.Errorf("dropdown title 'Help' not on row 1: %q", g.RowText(1))
+	}
+	// Body content ("q" or "drag grip" etc.) should be within a few
+	// rows below.
+	joined := ""
+	for y := 1; y < 8; y++ {
+		joined += g.RowText(y) + " | "
+	}
+	if !strings.Contains(joined, "drag grip") && !strings.Contains(joined, "Quit") {
+		t.Errorf("dropdown body not visible in rows 1..7: %q", joined)
+	}
+	// The dropdown must be ANCHORED under "Help" — its left border
+	// glyph ┌ or │ should appear at column 15. Look for a border-drawing
+	// character in a small band around row 1..2.
+	found := false
+	for y := 1; y < 3; y++ {
+		c := g.At(15, y)
+		if c.Rune == '┌' || c.Rune == '│' || c.Rune == '└' {
+			found = true
+			break
 		}
 	}
-	if !foundTitle {
-		t.Errorf("help popover title 'Help' not visible after menu click")
-	}
-	if !foundBody {
-		t.Errorf("help popover body item 'Quit' not visible after menu click")
+	if !found {
+		t.Errorf("dropdown not anchored at column 15 (under 'Help')")
 	}
 }
 
@@ -401,6 +411,44 @@ func TestExplorerClickOnGripStartsDragAndResizes(t *testing.T) {
 // tick — Cb bit 0x20 set = motion, low bits = 0 = left button held.
 func sgrMouseDrag(col, row int) []byte {
 	return []byte("\x1b[<32;" + itoa(col) + ";" + itoa(row) + "M")
+}
+
+// TestExplorerGripDragSurvivesCrossingIntoHeaderBand — starts a grip
+// drag in the body band, then continues the drag WITH THE MOUSE
+// STRAYING INTO THE HEADER ROW. Without packedVBox drag capture, the
+// header would receive the drag events and the grip would freeze.
+// Captured drag must continue updating leftFrac.
+func TestExplorerGripDragSurvivesCrossingIntoHeaderBand(t *testing.T) {
+	// Initial grip at col 25 (wire), press there.
+	// Drag to wire row 1 (header row!) at wire col 50 → local (49, 0).
+	// Without capture, packedVBox would route this to the header
+	// (which no-ops) and the grip wouldn't move. With capture, the
+	// event goes to body → hSplit → updates leftFrac.
+	keys := [][]byte{
+		sgrMousePress(25, 5),    // press on grip
+		sgrMouseDrag(50, 1),     // drag INTO header row
+		[]byte("\x1b[<0;50;1m"), // release in header row
+		[]byte("q"),
+	}
+	g := captureFrameWithBytes(t, 80, 30, keys, 5*time.Second)
+
+	// Grip after drag should NOT be at col 24 (initial) — it should
+	// have moved based on the drag X.
+	gripCol := -1
+	for x := 0; x < g.Cols; x++ {
+		if g.At(x, 5).Rune == '│' {
+			gripCol = x
+			break
+		}
+	}
+	if gripCol == 24 {
+		t.Errorf("grip stayed at col 24 — drag capture broken when crossing bands")
+	}
+	// Drag to wire X=50 = local X=49 → leftFrac = 49*100/80 = 61.
+	// Grip lands at col 80*61/100 = 48. Allow ±2 for timing jitter.
+	if gripCol < 46 || gripCol > 50 {
+		t.Errorf("grip col after cross-band drag = %d, want ≈48", gripCol)
+	}
 }
 
 // -----------------------------------------------------------------
