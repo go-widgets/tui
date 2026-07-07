@@ -309,6 +309,69 @@ func TestTextEditorFind(t *testing.T) {
 	}
 }
 
+func TestTextEditorReplace(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("foo bar foo\nbaz foo")
+	// Replace the first "foo" -> "X"; caret lands just after it.
+	if !e.Replace("foo", "X") || e.Text() != "X bar foo\nbaz foo" {
+		t.Fatalf("Replace #1 = %q", e.Text())
+	}
+	if e.CursorLine != 0 || e.CursorCol != 1 {
+		t.Errorf("caret after replace = (%d,%d), want (0,1)", e.CursorLine, e.CursorCol)
+	}
+	// A second Replace walks to the next "foo" (line 0 col 6).
+	if !e.Replace("foo", "X") || e.Text() != "X bar X\nbaz foo" {
+		t.Fatalf("Replace #2 = %q", e.Text())
+	}
+	// Undo restores the buffer one replacement at a time.
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "X bar foo\nbaz foo" {
+		t.Fatalf("undo replace = %q", e.Text())
+	}
+	// No match / empty query / ReadOnly are no-ops.
+	if e.Replace("zzz", "!") {
+		t.Error("Replace no-match should be false")
+	}
+	if e.Replace("", "!") {
+		t.Error("Replace empty query should be false")
+	}
+	e.ReadOnly = true
+	if e.Replace("foo", "!") {
+		t.Error("ReadOnly Replace should be false")
+	}
+}
+
+func TestTextEditorReplaceAll(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("aa a aa\naaa")
+	e.CursorLine, e.CursorCol = 0, 99 // caret past EOL -> clamped after ReplaceAll
+	if n := e.ReplaceAll("a", "bb"); n != 8 {
+		t.Fatalf("ReplaceAll count = %d, want 8", n)
+	}
+	if e.Text() != "bbbb bb bbbb\nbbbbbb" {
+		t.Fatalf("ReplaceAll text = %q", e.Text())
+	}
+	if e.CursorCol > len(e.Lines[e.CursorLine]) {
+		t.Errorf("caret not clamped: col=%d line-len=%d", e.CursorCol, len(e.Lines[e.CursorLine]))
+	}
+	// One undo reverts the whole ReplaceAll.
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "aa a aa\naaa" {
+		t.Fatalf("undo ReplaceAll = %q", e.Text())
+	}
+	// No match / empty query / ReadOnly return 0.
+	if e.ReplaceAll("zzz", "!") != 0 {
+		t.Error("ReplaceAll no-match should be 0")
+	}
+	if e.ReplaceAll("", "!") != 0 {
+		t.Error("ReplaceAll empty query should be 0")
+	}
+	e.ReadOnly = true
+	if e.ReplaceAll("a", "!") != 0 {
+		t.Error("ReadOnly ReplaceAll should be 0")
+	}
+}
+
 func TestTextEditorReadOnly(t *testing.T) {
 	e := NewTextEditor()
 	e.SetText("abc")
