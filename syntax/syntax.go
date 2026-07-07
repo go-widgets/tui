@@ -53,23 +53,42 @@ type Span struct {
 // The language is chosen from filename's extension; unknown extensions fall
 // back to a single Plain span per line.
 func Highlight(code, filename string) [][]Span {
-	switch lang(filename) {
+	switch id := lang(filename); id {
 	case "go":
 		return highlightGo(code)
 	case "markdown":
 		return highlightMarkdown(code)
 	default:
+		if spec, ok := specs[id]; ok {
+			return splitLines(tokenizeGeneric(code, spec))
+		}
 		return highlightPlain(code)
 	}
 }
 
-// lang maps a filename to a supported language id.
+// lang maps a filename to a supported language id. Go + markdown have dedicated
+// paths; the rest resolve to a langSpec in specs (see generic.go); anything
+// unknown is "plain".
 func lang(filename string) string {
 	switch strings.ToLower(path.Ext(filename)) {
 	case ".go":
 		return "go"
 	case ".md", ".markdown":
 		return "markdown"
+	case ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx":
+		return "javascript"
+	case ".py":
+		return "python"
+	case ".rb":
+		return "ruby"
+	case ".sh", ".bash", ".zsh":
+		return "shell"
+	case ".c", ".h", ".cc", ".cpp", ".hpp", ".cxx":
+		return "c"
+	case ".rs":
+		return "rust"
+	case ".json":
+		return "json"
 	default:
 		return "plain"
 	}
