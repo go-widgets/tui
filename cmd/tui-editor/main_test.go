@@ -172,6 +172,19 @@ func TestSaveNamedBufferError(t *testing.T) {
 	}
 }
 
+// TestRunCommandFind runs the "find <text>" palette command and asserts the
+// caret jumps to the match.
+func TestRunCommandFind(t *testing.T) {
+	s := newState()
+	s.tv.SetText("one two\nthree four")
+	if err := s.runCommand(tui.NewApp(), "find four"); err != nil {
+		t.Fatalf("runCommand(find) errored: %v", err)
+	}
+	if s.tv.CursorLine != 1 || s.tv.CursorCol != 6 {
+		t.Errorf("find four moved caret to (%d,%d), want (1,6)", s.tv.CursorLine, s.tv.CursorCol)
+	}
+}
+
 // TestRunCommandSave runs the "save" command and asserts writeFile
 // was called.
 func TestRunCommandSave(t *testing.T) {
