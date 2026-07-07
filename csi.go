@@ -102,6 +102,9 @@ func (p *InputParser) Feed(b []byte) []toolkit.Event {
 		case c == 0x04:
 			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+D"})
 			i++
+		case c == 0x19:
+			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Y"})
+			i++
 		case c == 0x1A:
 			events = append(events, toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Z"})
 			i++

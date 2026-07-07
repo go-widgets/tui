@@ -36,7 +36,40 @@ type TextEditor struct {
 	ReadOnly   bool
 	ShowGutter bool
 
-	spans [][]syntax.Span
+	spans      [][]syntax.Span
+	undo, redo []teSnapshot
+}
+
+// maxUndo caps the undo history so a long editing session can't grow the
+// snapshot stack without bound.
+const maxUndo = 200
+
+// teSnapshot is a point-in-time copy of the buffer + caret for undo/redo.
+type teSnapshot struct {
+	lines []string
+	line  int
+	col   int
+}
+
+func (t *TextEditor) snapshot() teSnapshot {
+	cp := make([]string, len(t.Lines))
+	copy(cp, t.Lines)
+	return teSnapshot{lines: cp, line: t.CursorLine, col: t.CursorCol}
+}
+
+func (t *TextEditor) restore(s teSnapshot) {
+	t.Lines = s.lines
+	t.CursorLine, t.CursorCol = s.line, s.col
+}
+
+// pushUndo records the current state before a mutation and drops any redo
+// history (a fresh edit invalidates the redo branch).
+func (t *TextEditor) pushUndo() {
+	t.undo = append(t.undo, t.snapshot())
+	if len(t.undo) > maxUndo {
+		t.undo = t.undo[len(t.undo)-maxUndo:]
+	}
+	t.redo = nil
 }
 
 // NewTextEditor returns an empty editor with the line-number gutter enabled.
@@ -138,9 +171,10 @@ func (t *TextEditor) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 }
 
-// OnEvent applies one input event: character insert, Backspace, Enter (unless
-// ReadOnly), the arrow keys, or a click (which positions the caret past the
-// gutter). Re-highlights after any change.
+// OnEvent applies one input event: character insert, Backspace, Enter, Ctrl+Z
+// (undo) / Ctrl+Y (redo) -- all no-ops when ReadOnly -- the arrow keys, or a
+// click (which positions the caret past the gutter). Re-highlights after any
+// change.
 func (t *TextEditor) OnEvent(ev toolkit.Event) {
 	if len(t.Lines) == 0 {
 		t.Lines = []string{""}
@@ -148,6 +182,7 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 	switch ev.Kind {
 	case toolkit.EventChar:
 		if !t.ReadOnly {
+			t.pushUndo()
 			line := t.Lines[t.CursorLine]
 			if t.CursorCol > len(line) {
 				t.CursorCol = len(line)
@@ -159,11 +194,25 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 		switch ev.Code {
 		case "Backspace":
 			if !t.ReadOnly {
+				t.pushUndo()
 				t.backspace()
 			}
 		case "Enter":
 			if !t.ReadOnly {
+				t.pushUndo()
 				t.splitLine()
+			}
+		case "Ctrl+Z":
+			if !t.ReadOnly && len(t.undo) > 0 {
+				t.redo = append(t.redo, t.snapshot())
+				t.restore(t.undo[len(t.undo)-1])
+				t.undo = t.undo[:len(t.undo)-1]
+			}
+		case "Ctrl+Y":
+			if !t.ReadOnly && len(t.redo) > 0 {
+				t.undo = append(t.undo, t.snapshot())
+				t.restore(t.redo[len(t.redo)-1])
+				t.redo = t.redo[:len(t.redo)-1]
 			}
 		case "Up":
 			if t.CursorLine > 0 {

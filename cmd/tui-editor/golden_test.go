@@ -211,6 +211,26 @@ func TestEditorHighlightsGoFileEndToEnd(t *testing.T) {
 	t.Skip("'func' not visible in the captured frame")
 }
 
+// TestEditorUndoEndToEnd drives the REAL editor binary in a pty: enter edit
+// mode ('i'), type "xy", undo with Ctrl+Z (0x1A), leave edit mode (Esc), quit.
+// The buffer must revert to "x" -- proving undo works through the parser (which
+// must emit "Ctrl+Z") and the tui.TextEditor OnEvent path.
+func TestEditorUndoEndToEnd(t *testing.T) {
+	g := captureFrame(t, 80, 30, "ixy\x1a\x1bq", 4*time.Second)
+	var full strings.Builder
+	for y := 0; y < g.Rows; y++ {
+		full.WriteString(g.RowText(y))
+		full.WriteByte('\n')
+	}
+	grid := full.String()
+	if strings.Contains(grid, "xy") {
+		t.Fatalf("undo did not remove the 'y' — grid still contains \"xy\"")
+	}
+	if !strings.Contains(grid, "x") {
+		t.Fatal("expected the surviving 'x' in the buffer, none visible")
+	}
+}
+
 func compareOrUpdateGolden(t *testing.T, g *tui.TermGrid, path string) {
 	t.Helper()
 	got := toGolden(g)
