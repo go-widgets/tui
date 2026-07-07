@@ -372,6 +372,184 @@ func TestTextEditorReplaceAll(t *testing.T) {
 	}
 }
 
+// drag is a mouse-drag event helper.
+func drag(x, y int) toolkit.Event { return toolkit.Event{Kind: toolkit.EventMouseDrag, X: x, Y: y} }
+
+func TestTextEditorSelectionMouse(t *testing.T) {
+	e := NewTextEditor()
+	e.ShowGutter = false // leftPad = 1
+	e.SetText("hello world\nsecond line")
+	// Click at col 6 ("world"), then drag to col 11 -> selects "world".
+	e.OnEvent(click(1+6, 0)) // leftPad(1)+col6
+	if e.selActive {
+		t.Fatal("a click should clear the selection")
+	}
+	e.OnEvent(drag(1+11, 0))
+	if got := e.SelectedText(); got != "world" {
+		t.Fatalf("SelectedText = %q, want %q", got, "world")
+	}
+	// A drag back onto the anchor makes the selection empty/inactive.
+	e.OnEvent(drag(1+6, 0))
+	if e.SelectedText() != "" {
+		t.Errorf("collapsed selection should be empty, got %q", e.SelectedText())
+	}
+	// Multi-line selection: anchor at (0,6), drag to (1,6).
+	e.OnEvent(click(1+6, 0))
+	e.OnEvent(drag(1+6, 1))
+	if got := e.SelectedText(); got != "world\nsecond" {
+		t.Fatalf("multi-line SelectedText = %q, want %q", got, "world\nsecond")
+	}
+	// selRange normalises a backwards selection (anchor after caret).
+	e.OnEvent(click(1+6, 1)) // caret on line 1
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	if got := e.SelectedText(); got != "hello world\nsecond" {
+		t.Fatalf("backwards SelectedText = %q, want %q", got, "hello world\nsecond")
+	}
+}
+
+func TestTextEditorSelectionMultiLine(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("aaa\nbbb\nccc\nddd")
+	// 4-line selection (0,1)-(3,2) exercises SelectedText's middle-line loop.
+	e.anchorLine, e.anchorCol, e.selActive = 0, 1, true
+	e.CursorLine, e.CursorCol = 3, 2
+	if got := e.SelectedText(); got != "aa\nbbb\nccc\ndd" {
+		t.Fatalf("multi-line SelectedText = %q", got)
+	}
+	// Cut exercises deleteRange's multi-line (line-join) branch.
+	if e.Cut() != "aa\nbbb\nccc\ndd" || e.Text() != "ad" {
+		t.Fatalf("multi-line Cut left %q", e.Text())
+	}
+	// Same-line backwards selection (anchor col > caret col) normalises.
+	e.SetText("hello")
+	e.CursorLine, e.CursorCol = 0, 1
+	e.anchorLine, e.anchorCol, e.selActive = 0, 4, true
+	if got := e.SelectedText(); got != "ell" {
+		t.Fatalf("same-line backwards = %q, want ell", got)
+	}
+}
+
+func TestTextEditorCopyCutPaste(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("abcdef")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 1, true
+	e.CursorCol = 4 // select "bcd"
+	if e.Copy() != "bcd" {
+		t.Fatalf("Copy = %q", e.Copy())
+	}
+	// Paste at end (move caret, no selection) inserts the clipboard.
+	e.selActive = false
+	e.CursorCol = 6
+	e.Paste()
+	if e.Text() != "abcdefbcd" {
+		t.Fatalf("Paste = %q", e.Text())
+	}
+	// Cut removes the selection + fills the clipboard.
+	e.SetText("one two three")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 4, true
+	e.CursorCol = 7 // "two"
+	if e.Cut() != "two" || e.Text() != "one  three" {
+		t.Fatalf("Cut left %q", e.Text())
+	}
+	// Paste replaces an active selection.
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	e.CursorCol = 3 // select "one"
+	e.Paste()       // clipboard is "two"
+	if e.Text() != "two  three" {
+		t.Fatalf("Paste-over-selection = %q", e.Text())
+	}
+	// Multi-line paste.
+	e.SetText("XY")
+	e.CursorCol = 1
+	e.clip = "a\nb"
+	e.selActive = false
+	e.Paste()
+	if e.Text() != "Xa\nbY" || e.CursorLine != 1 || e.CursorCol != 1 {
+		t.Fatalf("multi-line paste = %q cursor (%d,%d)", e.Text(), e.CursorLine, e.CursorCol)
+	}
+	// Empty clipboard + ReadOnly are no-ops.
+	e.clip = ""
+	before := e.Text()
+	e.Paste()
+	e.ReadOnly = true
+	e.clip = "z"
+	e.Paste()
+	if e.Text() != before {
+		t.Errorf("no-op paste mutated: %q", e.Text())
+	}
+}
+
+func TestTextEditorSelectionEditsAndKeys(t *testing.T) {
+	// Typing over a selection replaces it (one undo step).
+	e := NewTextEditor()
+	e.SetText("hello")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	e.CursorCol = 5 // whole word
+	e.OnEvent(char("X"))
+	if e.Text() != "X" {
+		t.Fatalf("type-over-selection = %q", e.Text())
+	}
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "hello" {
+		t.Fatalf("undo type-over = %q", e.Text())
+	}
+	// Backspace with a selection deletes the selection (not a char).
+	e.anchorLine, e.anchorCol, e.selActive = 0, 1, true
+	e.CursorCol = 4 // "ell"
+	e.OnEvent(key("Backspace"))
+	if e.Text() != "ho" {
+		t.Fatalf("backspace-selection = %q", e.Text())
+	}
+	// Enter with a selection replaces it with a line break.
+	e.SetText("abcdef")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 2, true
+	e.CursorCol = 4 // "cd"
+	e.OnEvent(key("Enter"))
+	if e.Text() != "ab\nef" {
+		t.Fatalf("enter-selection = %q", e.Text())
+	}
+	// An arrow key clears the selection without deleting.
+	e.SetText("abc")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	e.CursorCol = 2
+	e.OnEvent(key("Right"))
+	if e.selActive || e.Text() != "abc" {
+		t.Fatalf("arrow should clear selection without editing: active=%v text=%q", e.selActive, e.Text())
+	}
+	// Ctrl+X / Ctrl+V through OnEvent.
+	e.SetText("cut me")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	e.CursorCol = 3
+	e.OnEvent(key("Ctrl+X")) // cut "cut"
+	if e.Text() != " me" {
+		t.Fatalf("Ctrl+X = %q", e.Text())
+	}
+	e.CursorCol = len(e.Lines[0])
+	e.OnEvent(key("Ctrl+V")) // paste "cut" at end
+	if e.Text() != " mecut" {
+		t.Fatalf("Ctrl+V = %q", e.Text())
+	}
+	// SelectedText with no active selection is empty.
+	e.selActive = false
+	if e.SelectedText() != "" || e.DeleteSelection() {
+		t.Error("no-selection ops should be inert")
+	}
+}
+
+func TestTextEditorDrawSelection(t *testing.T) {
+	mk := func(w, h int) *painter.PixelPainter { return painter.NewPixelPainter(make([]byte, w*h*4), w, h) }
+	e := NewTextEditor()
+	e.SetText("alpha\nbravo\ncharlie")
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 2}) // H < lines -> clipped row
+	// Multi-line selection spanning all three lines (line 2 is clipped away).
+	e.anchorLine, e.anchorCol, e.selActive = 0, 2, true
+	e.CursorLine, e.CursorCol = 2, 3
+	e.Draw(mk(40, 2), toolkit.DefaultLight())
+	// Single-line selection.
+	e.CursorLine, e.CursorCol = 0, 4
+	e.Draw(mk(40, 2), toolkit.DefaultLight())
+}
+
 func TestTextEditorReadOnly(t *testing.T) {
 	e := NewTextEditor()
 	e.SetText("abc")
