@@ -62,6 +62,49 @@ func (t *TextEditor) FindNext() bool {
 	return t.searchForward(t.CursorLine, t.CursorCol+1, t.lastQuery)
 }
 
+// Replace finds the next occurrence of query (forward from the caret, wrapping)
+// and replaces it with repl, leaving the caret just after the replacement so a
+// repeated call walks to the next one. Returns whether a replacement happened.
+// No-op (false) when ReadOnly or query is empty. Undoable as one step.
+func (t *TextEditor) Replace(query, repl string) bool {
+	if t.ReadOnly || query == "" {
+		return false
+	}
+	if !t.searchForward(t.CursorLine, t.CursorCol, query) {
+		return false
+	}
+	t.pushUndo()
+	line := t.Lines[t.CursorLine]
+	t.Lines[t.CursorLine] = line[:t.CursorCol] + repl + line[t.CursorCol+len(query):]
+	t.CursorCol += len(repl)
+	t.rehighlight()
+	return true
+}
+
+// ReplaceAll replaces every occurrence of query with repl across the whole
+// buffer and returns the number replaced. The caret column is clamped to its
+// (possibly shorter) line. No-op (0) when ReadOnly or query is empty; the whole
+// operation is a single undo step.
+func (t *TextEditor) ReplaceAll(query, repl string) int {
+	if t.ReadOnly || query == "" {
+		return 0
+	}
+	total := 0
+	for _, line := range t.Lines {
+		total += strings.Count(line, query)
+	}
+	if total == 0 {
+		return 0
+	}
+	t.pushUndo()
+	for i := range t.Lines {
+		t.Lines[i] = strings.ReplaceAll(t.Lines[i], query, repl)
+	}
+	t.clampCol()
+	t.rehighlight()
+	return total
+}
+
 // searchForward scans lines from (startLine, startCol) forward, wrapping once
 // through the whole buffer (the k==len pass re-checks the start line from its
 // beginning so a match before startCol is still found). On a hit it moves the
