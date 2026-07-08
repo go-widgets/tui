@@ -5,6 +5,8 @@
 package tui
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-widgets/painter"
@@ -548,6 +550,53 @@ func TestTextEditorDrawSelection(t *testing.T) {
 	// Single-line selection.
 	e.CursorLine, e.CursorCol = 0, 4
 	e.Draw(mk(40, 2), toolkit.DefaultLight())
+}
+
+func TestTextEditorScroll(t *testing.T) {
+	mk := func(w, h int) *painter.PixelPainter { return painter.NewPixelPainter(make([]byte, w*h*4), w, h) }
+	e := NewTextEditor()
+	e.ShowGutter = false
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = "line" + strconv.Itoa(i)
+	}
+	e.SetText(strings.Join(lines, "\n"))
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 5}) // 5 visible rows
+	e.Focused = true
+
+	// Caret at top -> no scroll.
+	e.Draw(mk(40, 5), toolkit.DefaultLight())
+	if e.scrollY != 0 {
+		t.Fatalf("top scrollY = %d, want 0", e.scrollY)
+	}
+	// Caret past the bottom -> scroll down so it's the last visible row.
+	e.CursorLine = 12
+	e.Draw(mk(40, 5), toolkit.DefaultLight())
+	if e.scrollY != 8 { // 12 - 5 + 1
+		t.Fatalf("scroll-down scrollY = %d, want 8", e.scrollY)
+	}
+	// Caret above the viewport -> scroll up to it.
+	e.CursorLine = 3
+	e.Draw(mk(40, 5), toolkit.DefaultLight())
+	if e.scrollY != 3 {
+		t.Fatalf("scroll-up scrollY = %d, want 3", e.scrollY)
+	}
+	// A click at screen row 2 maps to buffer line scrollY+2 = 5.
+	e.OnEvent(click(1+0, 2))
+	if e.CursorLine != 5 {
+		t.Fatalf("click with scroll: line=%d, want 5", e.CursorLine)
+	}
+	// A selection within the scrolled viewport draws (scrolled highlight branch).
+	e.anchorLine, e.anchorCol, e.selActive = 4, 0, true
+	e.CursorLine, e.CursorCol = 6, 2
+	e.Draw(mk(40, 5), toolkit.DefaultLight())
+	// Zero-height bounds -> scrollToCaret's h<=0 guard is a no-op.
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 0})
+	before := e.scrollY
+	e.Draw(mk(40, 1), toolkit.DefaultLight())
+	if e.scrollY != before {
+		t.Errorf("zero-height Draw changed scrollY %d -> %d", before, e.scrollY)
+	}
 }
 
 func TestTextEditorReadOnly(t *testing.T) {
