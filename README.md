@@ -66,12 +66,30 @@ from also reaching `Root` — needed for mode-switching editors
 (pressing `i` to enter edit mode without also inserting `i` into
 the buffer).
 
+**Modal input capture** — set `app.InputTarget` to a widget and every
+event a Keys handler does not `Consume` goes to *it* instead of `Root`.
+This is the focus primitive a command palette or search box needs:
+swallow typing while the overlay is open, then clear it (set nil) to
+hand input back. `Root` still draws every frame; only routing changes.
+
+```go
+// Open a search box: capture typing, filter live.
+app.Keys["/"] = func(a *tui.App) { a.InputTarget = searchBox; a.Consume() }
+app.Keys["Escape"] = func(a *tui.App) { a.InputTarget = nil; a.Consume() }
+```
+
+Both `cmd/` demos use it — the editor's command palette and the
+explorer's incremental file finder route keystrokes into a `tui.Entry`
+this way.
+
 Two reference demos ship in `cmd/`:
 
 - `cmd/tui-explorer` — k9s-style file browser (file list + preview
-  pane + arrow-key navigation + help/search popovers).
+  pane + arrow-key navigation + a live `/` incremental finder +
+  File/View menus with a collapsible sidebar).
 - `cmd/tui-editor` — loom-style modal text editor (View / Edit /
-  Palette modes + file open + Ctrl+S save + Ctrl+P palette).
+  Palette modes + a typeable Ctrl+P command palette running
+  `save` / `quit` / `new` / `e <path>` / `find <text>` + Ctrl+S save).
 
 Both are exercised by real pty-based e2e tests
 (`//go:build unix && integration`) that spawn the binary under a
