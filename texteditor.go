@@ -559,6 +559,18 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 				}
 				t.indentLines(sl, el, -1)
 			}
+		case "Alt+Up":
+			if !t.ReadOnly {
+				t.pushUndo()
+				t.moveLineUp()
+				t.selActive = false
+			}
+		case "Alt+Down":
+			if !t.ReadOnly {
+				t.pushUndo()
+				t.moveLineDown()
+				t.selActive = false
+			}
 		}
 	case toolkit.EventClick:
 		// A click positions the caret and drops the anchor there; a subsequent
@@ -621,6 +633,24 @@ func (t *TextEditor) indentLines(sl, el, dir int) {
 				t.anchorCol = 0
 			}
 		}
+	}
+}
+
+// moveLineUp swaps the caret's line with the one above (no-op at the top). The
+// caller records undo.
+func (t *TextEditor) moveLineUp() {
+	if t.CursorLine > 0 {
+		t.Lines[t.CursorLine-1], t.Lines[t.CursorLine] = t.Lines[t.CursorLine], t.Lines[t.CursorLine-1]
+		t.CursorLine--
+	}
+}
+
+// moveLineDown swaps the caret's line with the one below (no-op at the bottom).
+// The caller records undo.
+func (t *TextEditor) moveLineDown() {
+	if t.CursorLine < len(t.Lines)-1 {
+		t.Lines[t.CursorLine+1], t.Lines[t.CursorLine] = t.Lines[t.CursorLine], t.Lines[t.CursorLine+1]
+		t.CursorLine++
 	}
 }
 

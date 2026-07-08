@@ -766,6 +766,49 @@ func TestTextEditorIndent(t *testing.T) {
 	}
 }
 
+func TestTextEditorMoveLine(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("a\nb\nc")
+	e.CursorLine = 1 // "b"
+	e.OnEvent(key("Alt+Up"))
+	if e.Text() != "b\na\nc" || e.CursorLine != 0 {
+		t.Fatalf("Alt+Up = %q line=%d", e.Text(), e.CursorLine)
+	}
+	e.OnEvent(key("Alt+Up")) // at the top -> no-op
+	if e.Text() != "b\na\nc" || e.CursorLine != 0 {
+		t.Fatalf("Alt+Up at top = %q line=%d", e.Text(), e.CursorLine)
+	}
+	e.CursorLine = 1 // "a"
+	e.OnEvent(key("Alt+Down"))
+	if e.Text() != "b\nc\na" || e.CursorLine != 2 {
+		t.Fatalf("Alt+Down = %q line=%d", e.Text(), e.CursorLine)
+	}
+	e.OnEvent(key("Alt+Down")) // at the bottom -> no-op
+	if e.CursorLine != 2 {
+		t.Fatalf("Alt+Down at bottom line=%d", e.CursorLine)
+	}
+	// Clears an active selection; one undo step restores the order.
+	e.SetText("x\ny")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	e.CursorLine = 1
+	e.OnEvent(key("Alt+Up"))
+	if e.selActive || e.Text() != "y\nx" {
+		t.Fatalf("Alt+Up selection/text: active=%v text=%q", e.selActive, e.Text())
+	}
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "x\ny" {
+		t.Fatalf("undo move = %q", e.Text())
+	}
+	// ReadOnly is a no-op.
+	e.ReadOnly = true
+	e.CursorLine = 1
+	e.OnEvent(key("Alt+Up"))
+	e.OnEvent(key("Alt+Down"))
+	if e.Text() != "x\ny" {
+		t.Error("ReadOnly move-line mutated")
+	}
+}
+
 func TestTextEditorReadOnly(t *testing.T) {
 	e := NewTextEditor()
 	e.SetText("abc")
