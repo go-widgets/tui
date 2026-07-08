@@ -173,7 +173,7 @@ func newState() *state {
 
 	fileDropdown := &tui.MenuDropdown{
 		Title:   "File",
-		Body:    []string{"New       ", "Open      :e <path>", "Save      Ctrl+S", "Quit      q"},
+		Body:    []string{"New       Ctrl+N", "Open      :e <path>", "Save      Ctrl+S", "Quit      q"},
 		AnchorY: 1,
 	}
 	fileDropdown.ItemActions = []func(){
@@ -356,7 +356,13 @@ func (c *paletteCapture) OnEvent(ev toolkit.Event) {
 	c.pop.Body = []string{"> " + c.entry.Text}
 }
 
-// newBuffer resets the editor to a fresh, unnamed, clean buffer.
+// newBuffer resets the editor to a fresh empty *scratch* buffer:
+// clears the text, drops the file name + dirty flag, and refreshes
+// the status bar. Shared by both the menu path
+// (fileDropdown.ItemActions[0]) and the keyboard path (Ctrl+N).
+//
+// Does NOT prompt to save an unsaved buffer — the demo trusts the
+// user; real editors would gate this behind a "buffer dirty?" modal.
 func (s *state) newBuffer() {
 	s.tv.SetText("")
 	s.tv.Filename = ""
@@ -512,6 +518,10 @@ func (s *state) keys() map[string]func(*tui.App) {
 		},
 		"Ctrl+Y": func(a *tui.App) {
 			s.redo()
+			a.Consume()
+		},
+		"Ctrl+N": func(a *tui.App) {
+			s.newBuffer()
 			a.Consume()
 		},
 	}

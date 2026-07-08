@@ -252,7 +252,7 @@ func TestRunCommandUnknownIsNoop(t *testing.T) {
 func TestKeyBindingsPresent(t *testing.T) {
 	s := newState()
 	m := s.keys()
-	for _, k := range []string{"Ctrl+C", "q", "i", "Escape", "Ctrl+S", "Ctrl+P", "Enter", "Ctrl+Z", "Ctrl+Y"} {
+	for _, k := range []string{"Ctrl+C", "q", "i", "Escape", "Ctrl+S", "Ctrl+P", "Enter", "Ctrl+Z", "Ctrl+Y", "Ctrl+N"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("keys()[%q] missing", k)
 		}
@@ -754,6 +754,51 @@ func TestNewStateFileSaveActionCallsSaveSeam(t *testing.T) {
 	s.fileDropdown.ItemActions[1]()
 	if s.mode != modePalette || s.paletteEn.Text != "e " {
 		t.Errorf("File → Open: mode=%v text=%q, want modePalette/\"e \"", s.mode, s.paletteEn.Text)
+	}
+}
+
+// TestNewBufferClearsAll — direct method test: text, file name,
+// filename (syntax key), dirty flag, and status label all reset.
+func TestNewBufferClearsAll(t *testing.T) {
+	s := newState()
+	s.tv.SetText("some stale content")
+	s.tv.Filename = "old.txt"
+	s.file = "old.txt"
+	s.dirty = true
+
+	s.newBuffer()
+
+	if got := s.tv.Text(); got != "" {
+		t.Errorf("newBuffer: text = %q, want empty", got)
+	}
+	if s.tv.Filename != "" {
+		t.Errorf("newBuffer: Filename = %q, want empty", s.tv.Filename)
+	}
+	if s.file != "" {
+		t.Errorf("newBuffer: file = %q, want empty", s.file)
+	}
+	if s.dirty {
+		t.Error("newBuffer: dirty flag still set")
+	}
+	if !strings.Contains(s.statusbar.Text, "*scratch*") {
+		t.Errorf("newBuffer: status = %q, want to contain *scratch*", s.statusbar.Text)
+	}
+}
+
+// TestCtrlNKeyClearsBuffer — the Ctrl+N key handler runs newBuffer.
+// Value-add on top of upstream's File → New menu wiring: gives the
+// keyboard-driven user the same shortcut, without needing to open
+// the menu.
+func TestCtrlNKeyClearsBuffer(t *testing.T) {
+	s := newState()
+	s.tv.SetText("goodbye")
+	s.dirty = true
+	s.keys()["Ctrl+N"](tui.NewApp())
+	if got := s.tv.Text(); got != "" {
+		t.Errorf("Ctrl+N handler did not clear buffer: %q", got)
+	}
+	if s.dirty {
+		t.Error("Ctrl+N handler did not clear dirty flag")
 	}
 }
 
