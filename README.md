@@ -88,20 +88,38 @@ pixels in `PixelPainter` mode. In `tui.RenderToolkit` /
 `tui.App` cell mode, those same integers count CELLS, so widgets
 that lean on large pad constants render at cell-inappropriate sizes.
 
-Cell-native (render at ~1 cell per glyph — safe in `tui.App`):
-`Label`, `TextView`, `Entry`, `Button`, `Popover`.
+So for the widgets whose pixel geometry doesn't survive the pixels→cells
+reinterpretation, `tui` ships its own **cell-native** versions (see the catalog
+below). A handful of simple `toolkit` widgets already render at ~1 cell per
+glyph and are safe to use directly in `tui.App`: `Label`, `TextView`. Others
+(`Alert`, `Card`, `Stat`, `HeaderBar`, `Toast`, `Banner`) are usable but
+visually inflated, and the pixel-only structural widgets (`toolkit.MenuBar`,
+`Notebook`, `HPaned`, …) render poorly — use the `tui` equivalents instead.
 
-Pixel-tuned (usable but visually inflated in cell mode):
-`Alert`, `Card`, `Stat`, `HeaderBar`, `Toast`, `Banner`.
+## Cell-native widget set
 
-Pixel-only (render poorly at any small cell size — replace with
-local cell-native helpers in `tui.App` consumers):
-`MenuBar`, `Statusbar`, `TreeView`, `Notebook`, `HPaned`,
-`VPaned`, `Scale`, `LevelBar`.
+Every widget below is a `toolkit.Widget` that renders through `painter.Painter`,
+so the *same* instance drives a terminal cell grid (TUI) **and** an RGBA pixel
+buffer (WUI/GUI) with no code change. All are 100%-covered and tuned so one glyph
+occupies one cell — no pixel padding leaking into the layout.
 
-The `cmd/tui-explorer` + `cmd/tui-editor` demos illustrate the
-pattern: they use local `packedVBox`, `hSplit`, `fileList`
-helpers instead of the pixel-tuned toolkit equivalents.
+| Widget | What it is |
+|--------|-----------|
+| `TextEditor` | read-write code editor: syntax highlight, gutter, undo/redo, search, selection (see below) |
+| `Entry` | single-line text input with placeholder, horizontal scroll, rune-indexed caret |
+| `Button` | clickable action; `Default` / `Prominent` / `Secondary` styles; hover + press states |
+| `CheckButton` | `[✓]` / `[ ]` boolean toggle with a label |
+| `Scale` | draggable slider over `Min..Max`; click / drag / arrow-key stepping |
+| `ProgressBar` | continuous `Fraction` fill with an optional centred label |
+| `ListBox` | scrollable single-select list with `OnSelect` |
+| `MenuBar` | top menu strip; `ItemXRange` for anchoring dropdowns |
+| `MenuDropdown` | anchored, self-sizing dropdown; per-row actions |
+| `Popover` | bordered modal overlay (title + body), hidden unless `Visible` |
+| `Statusbar` | footer strip of segments; last segment fills; lazy `SetSegment` |
+| `VBox` | header / body / footer layout with inset, hit-tested overlays + drag-capture |
+| `HSplit` | resizable horizontal split with a draggable grip column |
+
+The `cmd/tui-explorer` + `cmd/tui-editor` demos are built from these widgets.
 
 ## `tui.TextEditor`
 
