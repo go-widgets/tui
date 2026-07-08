@@ -4,9 +4,9 @@
 
 // tui-widgets renders the go-widgets/tui CELL-NATIVE widget set (every kind with
 // a public constructor) into a scrollable cell-grid frame written to stdout as
-// an ANSI stream. It is the cell-native counterpart of cmd/tui-catalogue (which
-// showcases the pixel toolkit widgets): here every entry is a tui.* widget that
-// renders one glyph per cell.
+// an ANSI stream. Every entry is a tui.* widget that renders one glyph per cell,
+// so the gallery reflects how the widgets actually look in a terminal (unlike
+// the pixel toolkit widgets, whose geometry does not map to a character grid).
 //
 // The default frame is auto-sized to fit every entry. Pipe through `less -R` if
 // your terminal's scrollback can't hold the whole frame:

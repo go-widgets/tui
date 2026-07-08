@@ -219,22 +219,10 @@ The `tui-snapshot` demo mirrors [`painter/cmd/tui-demo`](https://github.com/go-w
 same three-widget layout (label, two buttons, progress bar), same
 theme selection.
 
-For a broader showcase using the real
-[go-widgets/toolkit](https://github.com/go-widgets/toolkit) widgets
-(Button, ToggleButton, Switch, Entry, ProgressBar, Alert, Stat,
-Timeline …) rendered through the same cell backend:
-
-```bash
-# Toolkit widget catalogue in two columns
-go run ./cmd/tui-catalogue
-
-# Force size + dark theme
-go run ./cmd/tui-catalogue --cols=100 --rows=25 --theme=dark
-```
-
-To showcase the **cell-native `tui.*` widget set itself** (the catalog
-above renders the *pixel* toolkit widgets), run the `tui-widgets`
-gallery — one labelled slot per widget, every glyph exactly one cell:
+For a broad showcase of the **cell-native `tui.*` widget set**, run the
+`tui-widgets` gallery — one labelled slot per widget, every glyph exactly
+one cell (this is what realistic cell rendering looks like; the pixel
+`toolkit` widgets are for the WUI/GUI backends, not a character grid):
 
 ```bash
 # Gallery of all cell-native tui widgets (Button, Table, TreeView,
@@ -245,11 +233,6 @@ go run ./cmd/tui-widgets | less -R
 go run ./cmd/tui-widgets --widget=table --cols=50 --rows=8
 go run ./cmd/tui-widgets --list
 ```
-
-Internally uses `tui.RenderToolkit` (the bridge that accepts
-`toolkit.Widget` and translates `toolkit.Theme` to what
-`painter.CellPainter` expects) so the on-screen widgets are the
-same objects a wasm gallery or a native window would compose.
 
 For the interactive demos (`tui.App` powered):
 
