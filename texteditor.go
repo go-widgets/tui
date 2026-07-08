@@ -540,6 +540,25 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 					t.deleteForward()
 				}
 			}
+		case "Tab":
+			if !t.ReadOnly {
+				t.pushUndo()
+				if sl, _, el, _, ok := t.selRange(); ok && sl != el {
+					t.indentLines(sl, el, +1)
+				} else {
+					t.dropSelectionForEdit()
+					t.insertText(strings.Repeat(" ", indentWidth))
+				}
+			}
+		case "Shift+Tab":
+			if !t.ReadOnly {
+				t.pushUndo()
+				sl, _, el, _, ok := t.selRange()
+				if !ok || sl == el {
+					sl, el = t.CursorLine, t.CursorLine
+				}
+				t.indentLines(sl, el, -1)
+			}
 		}
 	case toolkit.EventClick:
 		// A click positions the caret and drops the anchor there; a subsequent
@@ -569,6 +588,40 @@ func (t *TextEditor) page() int {
 		return h
 	}
 	return 1
+}
+
+// indentWidth is the number of spaces one Tab / Shift+Tab step adds or removes.
+const indentWidth = 4
+
+// indentLines indents (dir=+1) or dedents (dir=-1) every line in [sl, el],
+// keeping the caret + selection anchor aligned with their text. The caller
+// records undo.
+func (t *TextEditor) indentLines(sl, el, dir int) {
+	for li := sl; li <= el; li++ {
+		before := len(t.Lines[li])
+		if dir > 0 {
+			t.Lines[li] = strings.Repeat(" ", indentWidth) + t.Lines[li]
+		} else {
+			n := 0
+			for n < indentWidth && n < len(t.Lines[li]) && t.Lines[li][n] == ' ' {
+				n++
+			}
+			t.Lines[li] = t.Lines[li][n:]
+		}
+		delta := len(t.Lines[li]) - before
+		if li == t.CursorLine {
+			t.CursorCol += delta
+			if t.CursorCol < 0 {
+				t.CursorCol = 0
+			}
+		}
+		if li == t.anchorLine {
+			t.anchorCol += delta
+			if t.anchorCol < 0 {
+				t.anchorCol = 0
+			}
+		}
+	}
 }
 
 // deleteForward removes the character after the caret, or joins the next line

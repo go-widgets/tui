@@ -125,6 +125,7 @@ func TestFeedCSINamedSequences(t *testing.T) {
 		{"Left", []byte{0x1B, '[', 'D'}, "Left"},
 		{"Home", []byte{0x1B, '[', 'H'}, "Home"},
 		{"End", []byte{0x1B, '[', 'F'}, "End"},
+		{"ShiftTab", []byte{0x1B, '[', 'Z'}, "Shift+Tab"},
 		{"Delete", []byte{0x1B, '[', '3', '~'}, "Delete"},
 		{"PageUp", []byte{0x1B, '[', '5', '~'}, "PageUp"},
 		{"PageDown", []byte{0x1B, '[', '6', '~'}, "PageDown"},
@@ -139,13 +140,13 @@ func TestFeedCSINamedSequences(t *testing.T) {
 }
 
 // TestFeedCSIUnknownConsumed covers three CSI decode-table misses:
-// an unknown final byte with no params (Z), an unknown ~-final
+// an unknown final byte with no params (J), an unknown ~-final
 // param (9~), and a non-'~' final with params (1;2A). All three
 // must be silently consumed with no event and the parser must
 // advance past the sequence so subsequent input parses cleanly.
 func TestFeedCSIUnknownConsumed(t *testing.T) {
 	cases := [][]byte{
-		{0x1B, '[', 'Z'},           // no-params + unmapped final
+		{0x1B, '[', 'J'},           // no-params + unmapped final
 		{0x1B, '[', '9', '~'},      // ~-final + unmapped param
 		{0x1B, '[', '1', ';', '2', 'A'}, // params + non-~ final
 	}

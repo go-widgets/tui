@@ -697,6 +697,75 @@ func TestTextEditorDeleteKey(t *testing.T) {
 	}
 }
 
+func TestTextEditorIndent(t *testing.T) {
+	e := NewTextEditor()
+	// Tab with no selection inserts a 4-space indent at the caret.
+	e.SetText("foo")
+	e.CursorCol = 0
+	e.OnEvent(key("Tab"))
+	if e.Text() != "    foo" || e.CursorCol != 4 {
+		t.Fatalf("Tab insert = %q col=%d", e.Text(), e.CursorCol)
+	}
+	// Shift+Tab (no selection) dedents the caret line, moving the caret back.
+	e.OnEvent(key("Shift+Tab"))
+	if e.Text() != "foo" || e.CursorCol != 0 {
+		t.Fatalf("Shift+Tab dedent = %q col=%d", e.Text(), e.CursorCol)
+	}
+	// Shift+Tab on a line with fewer than 4 leading spaces removes only those.
+	e.SetText("  bar") // 2 spaces
+	e.CursorCol = 3
+	e.OnEvent(key("Shift+Tab"))
+	if e.Text() != "bar" || e.CursorCol != 1 {
+		t.Fatalf("partial dedent = %q col=%d", e.Text(), e.CursorCol)
+	}
+	// Multi-line selection: Tab indents every selected line + shifts caret/anchor.
+	e.SetText("a\nb\nc")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	e.CursorLine, e.CursorCol = 2, 1
+	e.OnEvent(key("Tab"))
+	if e.Text() != "    a\n    b\n    c" {
+		t.Fatalf("multi-line indent = %q", e.Text())
+	}
+	if e.CursorCol != 5 || e.anchorCol != 4 {
+		t.Fatalf("indent caret=%d anchor=%d, want 5/4", e.CursorCol, e.anchorCol)
+	}
+	// Shift+Tab dedents the whole selection back.
+	e.OnEvent(key("Shift+Tab"))
+	if e.Text() != "a\nb\nc" || e.CursorCol != 1 || e.anchorCol != 0 {
+		t.Fatalf("multi-line dedent = %q caret=%d anchor=%d", e.Text(), e.CursorCol, e.anchorCol)
+	}
+	// A single-line selection + Tab replaces the selection with an indent.
+	e.SetText("xyz")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 0, true
+	e.CursorLine, e.CursorCol = 0, 3
+	e.OnEvent(key("Tab"))
+	if e.Text() != "    " {
+		t.Fatalf("single-line-selection Tab = %q", e.Text())
+	}
+	// Undo reverts the indent.
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "xyz" {
+		t.Fatalf("undo indent = %q", e.Text())
+	}
+	// Dedent with the caret + anchor inside the removed whitespace clamps both
+	// columns to 0.
+	e.SetText("    a\n    b")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 2, true // anchor within line 0's spaces
+	e.CursorLine, e.CursorCol = 1, 1                     // caret within line 1's spaces
+	e.OnEvent(key("Shift+Tab"))
+	if e.Text() != "a\nb" || e.CursorCol != 0 || e.anchorCol != 0 {
+		t.Fatalf("dedent col-clamp = %q caret=%d anchor=%d", e.Text(), e.CursorCol, e.anchorCol)
+	}
+	// ReadOnly Tab/Shift+Tab are no-ops.
+	e.SetText("z")
+	e.ReadOnly = true
+	e.OnEvent(key("Tab"))
+	e.OnEvent(key("Shift+Tab"))
+	if e.Text() != "z" {
+		t.Errorf("ReadOnly indent mutated: %q", e.Text())
+	}
+}
+
 func TestTextEditorReadOnly(t *testing.T) {
 	e := NewTextEditor()
 	e.SetText("abc")

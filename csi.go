@@ -205,6 +205,9 @@ func decodeCSI(params []byte, final byte) (toolkit.Event, bool) {
 			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Home"}, true
 		case 'F':
 			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "End"}, true
+		case 'Z':
+			// CSI Z = back-tab (Shift+Tab).
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Shift+Tab"}, true
 		}
 		return toolkit.Event{}, false
 	}
