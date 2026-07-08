@@ -252,7 +252,7 @@ func TestRunCommandUnknownIsNoop(t *testing.T) {
 func TestKeyBindingsPresent(t *testing.T) {
 	s := newState()
 	m := s.keys()
-	for _, k := range []string{"Ctrl+C", "q", "i", "Escape", "Ctrl+S", "Ctrl+P", "Enter"} {
+	for _, k := range []string{"Ctrl+C", "q", "i", "Escape", "Ctrl+S", "Ctrl+P", "Enter", "Ctrl+Z", "Ctrl+Y"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("keys()[%q] missing", k)
 		}
@@ -379,6 +379,53 @@ func TestCtrlPInPaletteIsNoop(t *testing.T) {
 	s.keys()["Ctrl+P"](tui.NewApp())
 	if s.mode != modePalette {
 		t.Fatalf("Ctrl+P inside palette flipped mode to %v", s.mode)
+	}
+}
+
+// TestCtrlZUndoesLastCharAndRefreshesStatus covers the Ctrl+Z key
+// handler: it must roll back the last char AND update the status bar
+// so the caret-position segment tracks. The App must be Consume()d
+// so Root.OnEvent doesn't run a second undo.
+func TestCtrlZUndoesLastCharAndRefreshesStatus(t *testing.T) {
+	s := newState()
+	// Type "hi" so undo has something to roll back. Insert via
+	// tv.OnEvent (matches the App's Root.OnEvent path).
+	s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "h"})
+	s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "i"})
+	s.refreshStatus() // baseline: cursor at 1:3
+	if s.tv.CursorCol != 2 {
+		t.Fatalf("setup: CursorCol = %d, want 2", s.tv.CursorCol)
+	}
+	if !strings.Contains(s.statusbar.Text, "1:3") {
+		t.Fatalf("setup status = %q, want to contain 1:3", s.statusbar.Text)
+	}
+	// The App's event-loop consumption path (Consume prevents
+	// Root.OnEvent from double-firing) is exercised by the
+	// integration test; here the handler is called directly.
+	s.keys()["Ctrl+Z"](tui.NewApp())
+	if s.tv.CursorCol != 1 {
+		t.Errorf("Ctrl+Z: CursorCol = %d, want 1", s.tv.CursorCol)
+	}
+	if !strings.Contains(s.statusbar.Text, "1:2") {
+		t.Errorf("Ctrl+Z status = %q, want to contain 1:2", s.statusbar.Text)
+	}
+}
+
+// TestCtrlYRedoesAndRefreshesStatus mirrors the undo test for redo.
+func TestCtrlYRedoesAndRefreshesStatus(t *testing.T) {
+	s := newState()
+	s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
+	// Undo once to seed the redo stack.
+	s.undo()
+	if s.tv.CursorCol != 0 {
+		t.Fatalf("setup undo: CursorCol = %d, want 0", s.tv.CursorCol)
+	}
+	s.keys()["Ctrl+Y"](tui.NewApp())
+	if s.tv.CursorCol != 1 {
+		t.Errorf("Ctrl+Y: CursorCol = %d, want 1", s.tv.CursorCol)
+	}
+	if !strings.Contains(s.statusbar.Text, "1:2") {
+		t.Errorf("Ctrl+Y status = %q, want to contain 1:2", s.statusbar.Text)
 	}
 }
 

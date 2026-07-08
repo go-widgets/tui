@@ -318,6 +318,51 @@ func TestEditorEditMenuUndoRestoresBuffer(t *testing.T) {
 	}
 }
 
+// TestEditorKeyboardCtrlZRefreshesStatus — enter edit mode via `i`,
+// type "abc", press Ctrl+Z (byte 0x1a in a raw pty). Assert the
+// status bar's cursor-position segment now shows "1:3" (rolled back
+// one char). Regression against upstream's Ctrl+Z path which
+// modifies the buffer but leaves the status stale.
+func TestEditorKeyboardCtrlZRefreshesStatus(t *testing.T) {
+	bin := buildBinary(t)
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, ptmx); close(done) }()
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("i"))    // insert mode
+		time.Sleep(150 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("abc"))
+		time.Sleep(150 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("\x1a")) // Ctrl+Z
+		time.Sleep(250 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("\x1b")) // Escape (leave edit mode)
+		time.Sleep(150 * time.Millisecond)
+		_, _ = ptmx.Write([]byte("q"))
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("binary did not exit within timeout")
+	}
+	_ = c.Wait()
+
+	// The last stripped frame after Escape returns to VIEW should
+	// show a cursor position of 1:3 (rolled back from 1:4).
+	stripped := stripANSI(buf.Bytes())
+	if !strings.Contains(stripped, "1:3") {
+		t.Errorf("Ctrl+Z did not refresh status to 1:3: %s", stripped)
+	}
+}
+
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
 func stripANSI(b []byte) string { return ansiRE.ReplaceAllString(string(b), "") }

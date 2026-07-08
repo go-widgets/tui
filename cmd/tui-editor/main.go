@@ -246,14 +246,8 @@ func newState() *state {
 		AnchorY: 1,
 	}
 	editDropdown.ItemActions = []func(){
-		func() {
-			tv.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Z"})
-			s.refreshStatus()
-		},
-		func() {
-			tv.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Y"})
-			s.refreshStatus()
-		},
+		func() { s.undo() },
+		func() { s.redo() },
 		nil, // Cut — stub
 		nil, // Copy — stub
 		nil, // Paste — stub
@@ -640,6 +634,20 @@ func (s *state) setMode(m mode) {
 	s.refreshStatus()
 }
 
+// undo / redo forward the underlying TextEditor's Ctrl+Z / Ctrl+Y
+// handling, then refresh the status bar so the caret-position
+// segment tracks the new cursor. Shared by both the menu path
+// (editDropdown.ItemActions) and the keyboard path (s.keys()).
+func (s *state) undo() {
+	s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Z"})
+	s.refreshStatus()
+}
+
+func (s *state) redo() {
+	s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Ctrl+Y"})
+	s.refreshStatus()
+}
+
 // save writes the buffer to s.file via the writeFile seam. Returns
 // nil on success (including the "unnamed buffer, nothing to save"
 // case), or the underlying write error.
@@ -724,6 +732,21 @@ func (s *state) keys() map[string]func(*tui.App) {
 			}
 			// In edit mode, Enter falls through to TextView (splits
 			// the line at the cursor). Nothing to do here.
+		},
+		// Ctrl+Z / Ctrl+Y — undo/redo. Upstream's tui.TextEditor
+		// already handles these on its own OnEvent path (falling
+		// through from App to Root), but its handler doesn't call
+		// refreshStatus so the caret-position segment stayed stale.
+		// Intercept here, dispatch via s.undo/s.redo (which refresh
+		// status), and Consume so Root.OnEvent doesn't run a second
+		// undo/redo on the same event.
+		"Ctrl+Z": func(a *tui.App) {
+			s.undo()
+			a.Consume()
+		},
+		"Ctrl+Y": func(a *tui.App) {
+			s.redo()
+			a.Consume()
 		},
 	}
 }
