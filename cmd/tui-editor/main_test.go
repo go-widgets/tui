@@ -827,11 +827,60 @@ func TestNewStateEditUndoRedoActionsRouteThroughTextEditor(t *testing.T) {
 	if s.tv.CursorCol != 1 {
 		t.Errorf("Redo did not restore cursor: col = %d, want 1", s.tv.CursorCol)
 	}
-	// Stub rows 2..4 are nil.
+	// Rows 2..4 (Cut / Copy / Paste) are now wired to tv methods.
+	// Just check each is non-nil; behaviour is exercised in
+	// TestEditCutCopyPasteRoutesThroughTextEditor below.
 	for i := 2; i < 5; i++ {
-		if s.editDropdown.ItemActions[i] != nil {
-			t.Errorf("edit row %d expected nil (stub), got action", i)
+		if s.editDropdown.ItemActions[i] == nil {
+			t.Errorf("edit row %d expected action, got nil (stub)", i)
 		}
+	}
+}
+
+// TestEditCutCopyPasteRoutesThroughTextEditor exercises the Cut /
+// Copy / Paste menu wiring against a live TextEditor. Selection is
+// primed via the mouse-drag path (Click sets anchor, MouseDrag
+// activates) since upstream TextEditor keeps the anchor field
+// private.
+//
+// tui.GutterWidth(1) = 3 (2 min digits + 1 sep). clickAt subtracts
+// leftPad from the widget-local X, so char-col 0 lives at widget X
+// = 3 exactly.
+func TestEditCutCopyPasteRoutesThroughTextEditor(t *testing.T) {
+	s := newState()
+	s.tv.SetText("hello world")
+	pad := tui.GutterWidth(len(s.tv.Lines))
+
+	// primeSelection selects text-col 0..end via a click+drag path.
+	primeSelection := func(endCol int) {
+		s.tv.CursorLine, s.tv.CursorCol = 0, 0
+		s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: pad, Y: 0})
+		s.tv.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: pad + endCol, Y: 0})
+	}
+
+	// Copy — buffer unchanged, clipboard now holds "hello".
+	primeSelection(5)
+	s.editDropdown.ItemActions[3]()
+	if got := s.tv.Text(); got != "hello world" {
+		t.Errorf("Copy changed buffer: %q", got)
+	}
+	if got := s.tv.SelectedText(); got != "hello" {
+		t.Errorf("Copy selection = %q, want %q", got, "hello")
+	}
+
+	// Cut — buffer loses "hello".
+	primeSelection(5)
+	s.editDropdown.ItemActions[2]()
+	if got := s.tv.Text(); got != " world" {
+		t.Errorf("Cut: buffer = %q, want %q", got, " world")
+	}
+
+	// Paste — puts the clipboard back at the caret. After Cut the
+	// caret is at col 0 (start of "world"), clipboard holds "hello".
+	s.tv.CursorLine, s.tv.CursorCol = 0, 0
+	s.editDropdown.ItemActions[4]()
+	if got := s.tv.Text(); got != "hello world" {
+		t.Errorf("Paste: buffer = %q, want %q", got, "hello world")
 	}
 }
 

@@ -242,15 +242,15 @@ func newState() *state {
 	}
 	editDropdown := &menuDropdown{
 		Title:   "Edit",
-		Body:    []string{"Undo   Ctrl+Z", "Redo   Ctrl+Y", "Cut    (stub)", "Copy   (stub)", "Paste  (stub)"},
+		Body:    []string{"Undo   Ctrl+Z", "Redo   Ctrl+Y", "Cut    Ctrl+X", "Copy   Ctrl+C", "Paste  Ctrl+V"},
 		AnchorY: 1,
 	}
 	editDropdown.ItemActions = []func(){
 		func() { s.undo() },
 		func() { s.redo() },
-		nil, // Cut — stub
-		nil, // Copy — stub
-		nil, // Paste — stub
+		func() { _ = tv.Cut() },
+		func() { _ = tv.Copy() },
+		func() { tv.Paste(); s.refreshStatus() },
 	}
 	viewDropdown := &menuDropdown{
 		Title:   "View",
