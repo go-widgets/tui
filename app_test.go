@@ -273,6 +273,30 @@ func TestRunHappyPathQuitOnKey(t *testing.T) {
 	}
 }
 
+// TestRunInputTargetCapturesInput verifies that a non-nil InputTarget
+// receives unconsumed events INSTEAD of Root (modal input capture).
+func TestRunInputTargetCapturesInput(t *testing.T) {
+	h := newHarness(t)
+	root := &recordingWidget{}
+	target := &recordingWidget{}
+	h.app.Root = root
+	h.app.InputTarget = target
+
+	wait := h.runAsync(t)
+	if _, err := h.stdinW.Write([]byte{'x'}); err != nil {
+		t.Fatalf("write x: %v", err)
+	}
+	h.waitFor(t, func() bool { return target.eventCount() >= 1 }, "InputTarget event")
+	if root.eventCount() != 0 {
+		t.Errorf("Root got %d events while InputTarget set, want 0", root.eventCount())
+	}
+	h.interruptCh <- struct{}{}
+	_ = h.stdinW.Close()
+	if code := wait(); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
 // TestRunInterruptQuits covers the interruptCh select case: the
 // signal path funnels into Quit and the loop exits cleanly.
 func TestRunInterruptQuits(t *testing.T) {

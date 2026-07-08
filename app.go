@@ -48,6 +48,13 @@ type App struct {
 	// App always dispatches to Root afterwards.
 	Keys map[string]func(*App)
 
+	// InputTarget, when non-nil, receives every event that a Keys handler
+	// does not Consume — INSTEAD of Root. It is a modal input capture: a
+	// command palette or search box sets it to swallow typing while open,
+	// then clears it (sets nil) to hand input back to Root. Root is still
+	// drawn every frame; only event routing changes.
+	InputTarget toolkit.Widget
+
 	// TickHz sets the auto-tick frequency in Hz. 0 disables ticks. A
 	// widget subscribing to EventTick needs TickHz > 0 to animate.
 	TickHz int
@@ -285,8 +292,13 @@ loop:
 				if h, ok := a.Keys[ev.Code]; ok {
 					h(a)
 				}
-				if !a.consumed && a.Root != nil {
-					a.Root.OnEvent(ev)
+				if !a.consumed {
+					// Modal capture wins over Root when set.
+					if a.InputTarget != nil {
+						a.InputTarget.OnEvent(ev)
+					} else if a.Root != nil {
+						a.Root.OnEvent(ev)
+					}
 				}
 			}
 			a.dirty = true
