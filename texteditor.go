@@ -47,6 +47,22 @@ type TextEditor struct {
 	anchorLine, anchorCol int
 	selActive             bool
 	clip                  string
+
+	scrollY int // first visible line; the viewport follows the caret
+}
+
+// scrollToCaret adjusts the scroll offset so the caret's line stays within the
+// visible rows (the pane height). Called at the top of Draw.
+func (t *TextEditor) scrollToCaret() {
+	h := t.Bounds().H
+	if h <= 0 {
+		return
+	}
+	if t.CursorLine < t.scrollY {
+		t.scrollY = t.CursorLine
+	} else if t.CursorLine >= t.scrollY+h {
+		t.scrollY = t.CursorLine - h + 1
+	}
 }
 
 // selRange returns the normalised selection as [start, end) plus whether a
@@ -361,6 +377,7 @@ func (t *TextEditor) leftPad() int {
 // syntax-highlighted text, and the caret.
 func (t *TextEditor) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	r := t.Bounds()
+	t.scrollToCaret() // keep the caret in view; scrollY stays 0 for short buffers
 	// SurfaceAlt background so the pane edge is visible against the frame in
 	// any theme.
 	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, painter.RGBA{
@@ -372,8 +389,8 @@ func (t *TextEditor) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	if sl, sc, el, ec, ok := t.selRange(); ok {
 		selBg := painter.RGBA{R: theme.Accent.R, G: theme.Accent.G, B: theme.Accent.B, A: theme.Accent.A}
 		for li := sl; li <= el; li++ {
-			y := r.Y + li
-			if li >= len(t.Lines) || y < r.Y || y >= r.Y+r.H {
+			y := r.Y + (li - t.scrollY)
+			if li >= len(t.Lines) || li < t.scrollY || y >= r.Y+r.H {
 				continue
 			}
 			startC, endC := 0, len(t.Lines[li])
@@ -392,8 +409,8 @@ func (t *TextEditor) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 			}
 		}
 	}
-	for i, line := range t.spans {
-		y := r.Y + i
+	for i := t.scrollY; i < len(t.spans); i++ {
+		y := r.Y + (i - t.scrollY)
 		if y >= r.Y+r.H {
 			break
 		}
@@ -402,15 +419,15 @@ func (t *TextEditor) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 			toolkit.DrawText(pnt, r.X+pad-1-len(num), y, num, numInk)
 		}
 		x := r.X + pad
-		for _, sp := range line {
+		for _, sp := range t.spans[i] {
 			toolkit.DrawText(pnt, x, y, sp.Text, SyntaxInk(sp.Kind, theme))
 			x += utf8.RuneCountInString(sp.Text) // 1 cell per rune
 		}
 	}
 	// Caret: a reverse-video block one cell wide at the cursor.
-	if t.Focused && t.CursorLine >= 0 && t.CursorLine < r.H {
+	if t.Focused && t.CursorLine >= t.scrollY {
 		cx := r.X + pad + t.CursorCol
-		cy := r.Y + t.CursorLine
+		cy := r.Y + (t.CursorLine - t.scrollY)
 		if cx < r.X+r.W && cy < r.Y+r.H {
 			pnt.FillRect(painter.Rect{X: cx, Y: cy, W: 1, H: 1}, painter.RGBA{
 				R: theme.OnSurface.R, G: theme.OnSurface.G, B: theme.OnSurface.B, A: theme.OnSurface.A,
@@ -546,7 +563,7 @@ func (t *TextEditor) splitLine() {
 }
 
 func (t *TextEditor) clickAt(evx, evy int) {
-	y := evy
+	y := evy + t.scrollY // screen row -> buffer line
 	if y < 0 {
 		y = 0
 	}
