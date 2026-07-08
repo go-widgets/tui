@@ -599,6 +599,104 @@ func TestTextEditorScroll(t *testing.T) {
 	}
 }
 
+func TestTextEditorNavKeys(t *testing.T) {
+	e := NewTextEditor()
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 5})
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = "line" + strconv.Itoa(i)
+	}
+	e.SetText(strings.Join(lines, "\n"))
+	// Home / End on a line.
+	e.CursorLine, e.CursorCol = 0, 3
+	e.OnEvent(key("End"))
+	if e.CursorCol != len("line0") {
+		t.Fatalf("End col = %d, want %d", e.CursorCol, len("line0"))
+	}
+	e.OnEvent(key("Home"))
+	if e.CursorCol != 0 {
+		t.Fatalf("Home col = %d, want 0", e.CursorCol)
+	}
+	// PageDown moves ~a viewport down (page = H-1 = 4); PageUp back.
+	e.CursorLine = 0
+	e.OnEvent(key("PageDown"))
+	if e.CursorLine != 4 {
+		t.Fatalf("PageDown line = %d, want 4", e.CursorLine)
+	}
+	e.OnEvent(key("PageUp"))
+	if e.CursorLine != 0 {
+		t.Fatalf("PageUp line = %d, want 0", e.CursorLine)
+	}
+	// PageDown clamps at the last line; PageUp clamps at 0.
+	e.CursorLine = 18
+	e.OnEvent(key("PageDown"))
+	if e.CursorLine != 19 {
+		t.Fatalf("PageDown clamp = %d, want 19", e.CursorLine)
+	}
+	e.CursorLine = 2
+	e.OnEvent(key("PageUp"))
+	if e.CursorLine != 0 {
+		t.Fatalf("PageUp clamp = %d, want 0", e.CursorLine)
+	}
+	// PageDown clamps the column to the (shorter) destination line.
+	e.SetText("longcolumnhere\nx")
+	e.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 1}) // page() -> 1
+	e.CursorLine, e.CursorCol = 0, 12
+	e.OnEvent(key("PageDown"))
+	if e.CursorLine != 1 || e.CursorCol != 1 {
+		t.Fatalf("PageDown clampCol = (%d,%d), want (1,1)", e.CursorLine, e.CursorCol)
+	}
+	// A nav key clears an active selection.
+	e.anchorLine, e.anchorCol, e.selActive = 1, 0, true
+	e.OnEvent(key("Home"))
+	if e.selActive {
+		t.Error("Home should clear the selection")
+	}
+}
+
+func TestTextEditorDeleteKey(t *testing.T) {
+	e := NewTextEditor()
+	e.SetText("abc\ndef")
+	// Delete the char after the caret.
+	e.CursorLine, e.CursorCol = 0, 1
+	e.OnEvent(key("Delete"))
+	if e.Text() != "ac\ndef" {
+		t.Fatalf("Delete mid-line = %q", e.Text())
+	}
+	// Delete at end-of-line joins the next line.
+	e.CursorCol = 2
+	e.OnEvent(key("Delete"))
+	if e.Text() != "acdef" {
+		t.Fatalf("Delete at EOL = %q", e.Text())
+	}
+	// Delete at end-of-buffer is a no-op.
+	e.CursorLine, e.CursorCol = 0, len(e.Lines[0])
+	before := e.Text()
+	e.OnEvent(key("Delete"))
+	if e.Text() != before {
+		t.Errorf("Delete at EOF mutated: %q", e.Text())
+	}
+	// Delete with a selection removes the selection.
+	e.SetText("keep XXX end")
+	e.anchorLine, e.anchorCol, e.selActive = 0, 5, true
+	e.CursorCol = 8
+	e.OnEvent(key("Delete"))
+	if e.Text() != "keep  end" {
+		t.Fatalf("Delete selection = %q", e.Text())
+	}
+	// Undo restores it; ReadOnly Delete is a no-op.
+	e.OnEvent(key("Ctrl+Z"))
+	if e.Text() != "keep XXX end" {
+		t.Fatalf("undo Delete = %q", e.Text())
+	}
+	e.ReadOnly = true
+	e.CursorCol = 0
+	e.OnEvent(key("Delete"))
+	if e.Text() != "keep XXX end" {
+		t.Error("ReadOnly Delete mutated")
+	}
+}
+
 func TestTextEditorReadOnly(t *testing.T) {
 	e := NewTextEditor()
 	e.SetText("abc")
