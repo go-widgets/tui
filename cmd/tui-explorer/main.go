@@ -33,9 +33,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
 )
@@ -75,6 +78,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	st := newState()
 	app := newAppFunc()
+	st.app = app       // enables the search finder's InputTarget routing
+	st.quit = app.Quit // late-bind the File → Quit menu action
 	app.Root = st.root
 	if *theme == "dark" {
 		app.Theme = toolkit.DefaultDark()
@@ -94,14 +99,20 @@ type state struct {
 	content       *tui.TextEditor
 	status        *toolkit.Label
 	menuBar       *tui.MenuBar
+	body          *tui.HSplit // sidebar/preview split — toggled by View → Toggle sidebar
 	helpPopover   *tui.Popover
 	searchPopover *tui.Popover
+	search        *tui.Entry     // the finder's query input (mirrored into searchPopover)
+	capture       *searchCapture // App.InputTarget while the finder is open
 	fileDropdown  *tui.MenuDropdown
 	viewDropdown  *tui.MenuDropdown
 	helpDropdown  *tui.MenuDropdown
 	root          *tui.VBox
 	files         map[string]string
-	paths         []string // flat, order-stable list of file paths for list indexing
+	paths         []string // full, order-stable file list (fileList.Items is the filtered view)
+	searching     bool
+	app           *tui.App // late-bound in run() for InputTarget routing
+	quit          func()   // late-bound in run() = app.Quit
 }
 
 // newState composes the demo out of tui library widgets:
@@ -128,6 +139,8 @@ func newState() *state {
 
 	body := &tui.HSplit{Left: fl, Right: content, LeftFrac: 30}
 
+	search := &tui.Entry{Placeholder: "type to filter files"}
+
 	status := toolkit.NewLabel("q: quit  ?: help  /: search  Up/Down: navigate  Enter: open")
 
 	helpPopover := &tui.Popover{
@@ -146,30 +159,38 @@ func newState() *state {
 		},
 	}
 	searchPopover := &tui.Popover{
-		Title: "Search",
-		Body: []string{
-			"(v0.3.x: overlay stub — real fuzzy",
-			"finder is planned for v0.4)",
-		},
+		Title: "Find file",
+		Body:  []string{"/", "type to filter — Enter accept, Esc cancel"},
 	}
 	// Anchored dropdowns sit directly below the menu item. AnchorY=1
 	// (headerH), AnchorX is patched in by menuBar.ItemXRange when the
 	// item is clicked so the dropdown lines up with its label.
+	// Forward-declared so menu closures can call state methods.
+	s := &state{}
+
 	fileDropdown := &tui.MenuDropdown{
 		Title:   "File",
-		Body:    []string{"New       (stub)", "Open      (stub)", "Reload    (stub)", "Quit      q"},
+		Body:    []string{"Open      Enter", "Reload    ", "Quit      q"},
 		AnchorY: 1,
+	}
+	fileDropdown.ItemActions = []func(){
+		func() { s.syncContent() }, // Open: preview the selected file
+		func() { s.syncContent() }, // Reload: re-read the preview from the store
+		func() {
+			if s.quit != nil {
+				s.quit()
+			}
+		},
 	}
 	viewDropdown := &tui.MenuDropdown{
 		Title:   "View",
-		Body:    []string{"Toggle line numbers", "Toggle sidebar  (drag grip)", "Focus preview   Enter", "Refresh         Enter"},
+		Body:    []string{"Toggle line numbers", "Toggle sidebar", "Refresh"},
 		AnchorY: 1,
 	}
 	viewDropdown.ItemActions = []func(){
 		func() { content.ShowGutter = !content.ShowGutter },
-		nil, // "Toggle sidebar" — informational (grip drag does it)
-		nil, // "Focus preview" — informational
-		nil, // "Refresh" — informational
+		func() { s.toggleSidebar() },
+		func() { s.syncContent() },
 	}
 	helpDropdown := &tui.MenuDropdown{
 		Title: "Help",
@@ -217,13 +238,17 @@ func newState() *state {
 		Overlays: []toolkit.Widget{helpPopover, searchPopover, fileDropdown, viewDropdown, helpDropdown},
 	}
 
-	s := &state{
+	capture := &searchCapture{st: s}
+	*s = state{
 		fileList:      fl,
 		content:       content,
 		status:        status,
 		menuBar:       mb,
+		body:          body,
 		helpPopover:   helpPopover,
 		searchPopover: searchPopover,
+		search:        search,
+		capture:       capture,
 		fileDropdown:  fileDropdown,
 		viewDropdown:  viewDropdown,
 		helpDropdown:  helpDropdown,
@@ -238,17 +263,96 @@ func newState() *state {
 	return s
 }
 
-// syncContent refreshes the right pane with the file at the currently
-// selected list index.
+// syncContent refreshes the right pane with the currently selected file. It
+// indexes the *visible* list (fileList.Items), which equals paths when unfiltered
+// and the match subset while the finder is active.
 func (s *state) syncContent() {
-	if s.fileList.Selected < 0 || s.fileList.Selected >= len(s.paths) {
+	if s.fileList.Selected < 0 || s.fileList.Selected >= len(s.fileList.Items) {
 		s.content.Filename = ""
 		s.content.SetText("(no selection)")
 		return
 	}
-	path := s.paths[s.fileList.Selected]
+	path := s.fileList.Items[s.fileList.Selected]
 	s.content.Filename = path
 	s.content.SetText(s.files[path])
+}
+
+// toggleSidebar collapses the sidebar (LeftFrac 0) or restores it (30), then
+// re-lays-out the split so the panes reflow immediately.
+func (s *state) toggleSidebar() {
+	if s.body.LeftFrac == 0 {
+		s.body.LeftFrac = 30
+	} else {
+		s.body.LeftFrac = 0
+	}
+	s.body.SetBounds(s.body.Bounds())
+}
+
+// searchCapture is the App.InputTarget while the finder is open: each keystroke
+// edits the query entry, then re-filters the list. Never drawn (input-only).
+type searchCapture struct {
+	toolkit.Base
+	st *state
+}
+
+func (c *searchCapture) Draw(painter.Painter, *toolkit.Theme) {}
+
+func (c *searchCapture) OnEvent(ev toolkit.Event) {
+	c.st.search.OnEvent(ev)
+	c.st.applyFilter()
+}
+
+// applyFilter narrows fileList.Items to the paths containing the (lower-cased)
+// query, refreshes the finder overlay and the preview.
+func (s *state) applyFilter() {
+	q := strings.ToLower(s.search.Text)
+	if q == "" {
+		s.fileList.Items = s.paths
+	} else {
+		matches := []string{}
+		for _, p := range s.paths {
+			if strings.Contains(strings.ToLower(p), q) {
+				matches = append(matches, p)
+			}
+		}
+		s.fileList.Items = matches
+	}
+	if s.fileList.Selected >= len(s.fileList.Items) {
+		s.fileList.Selected = 0
+	}
+	s.searchPopover.Body = []string{
+		"/" + s.search.Text,
+		fmt.Sprintf("%d match(es) — Enter accept, Esc cancel", len(s.fileList.Items)),
+	}
+	s.syncContent()
+}
+
+// openSearch enters finder mode: reset the query, show the overlay, and route
+// typing into the query entry via InputTarget.
+func (s *state) openSearch() {
+	s.searching = true
+	s.search.Text = ""
+	s.search.Cursor = 0
+	s.searchPopover.Visible = true
+	if s.app != nil {
+		s.app.InputTarget = s.capture
+	}
+	s.applyFilter()
+}
+
+// closeSearch leaves finder mode. When restore is true (Esc / cancel) the full
+// file list comes back; when false (Enter / accept) the current match subset is
+// kept so the user browses the filtered results.
+func (s *state) closeSearch(restore bool) {
+	s.searching = false
+	s.searchPopover.Visible = false
+	if s.app != nil {
+		s.app.InputTarget = nil
+	}
+	if restore {
+		s.fileList.Items = s.paths
+	}
+	s.syncContent() // guards an out-of-range selection on its own
 }
 
 // keys returns the App key bindings. Extracted as a method rather than an
@@ -256,15 +360,36 @@ func (s *state) syncContent() {
 // stepping through Run().
 func (s *state) keys() map[string]func(*tui.App) {
 	return map[string]func(*tui.App){
-		"q":      func(a *tui.App) { a.Quit() },
+		// Ctrl+C always quits. The letter keys (q / ? / /) are guarded by
+		// !searching so, while the finder is open, they fall through to the
+		// query entry instead of triggering their command.
 		"Ctrl+C": func(a *tui.App) { a.Quit() },
+		"q": func(a *tui.App) {
+			if !s.searching {
+				a.Quit()
+				a.Consume()
+			}
+		},
 		"?": func(a *tui.App) {
-			s.helpPopover.Visible = !s.helpPopover.Visible
-			a.Refresh()
+			if !s.searching {
+				s.helpPopover.Visible = !s.helpPopover.Visible
+				a.Refresh()
+				a.Consume()
+			}
 		},
 		"/": func(a *tui.App) {
-			s.searchPopover.Visible = !s.searchPopover.Visible
-			a.Refresh()
+			if !s.searching {
+				s.openSearch()
+				a.Refresh()
+				a.Consume()
+			}
+		},
+		"Escape": func(a *tui.App) {
+			if s.searching {
+				s.closeSearch(true) // cancel — restore the full list
+				a.Refresh()
+				a.Consume()
+			}
 		},
 		"Up": func(a *tui.App) {
 			if s.fileList.Selected > 0 {
@@ -281,8 +406,13 @@ func (s *state) keys() map[string]func(*tui.App) {
 			}
 		},
 		"Enter": func(a *tui.App) {
-			s.syncContent()
+			if s.searching {
+				s.closeSearch(false) // accept — keep the filtered list
+			} else {
+				s.syncContent()
+			}
 			a.Refresh()
+			a.Consume()
 		},
 	}
 }

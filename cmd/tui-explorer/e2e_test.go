@@ -715,3 +715,24 @@ func buildBinary(t *testing.T) string {
 
 // findLastFrame kept exported (via _ =) for downstream refactor.
 var _ = findLastFrame
+
+// TestExplorerFinderFiltersFileList is the end-to-end proof that the search
+// finder actually accepts typed input and narrows the list (it was a static
+// "planned" stub before App.InputTarget routed keys into its entry): press '/'
+// to open the finder, type "util", Enter to accept, then 'q' to quit. The final
+// frame must show the file list narrowed to /src/util.go with /LICENSE filtered
+// out. If the finder input were inert, the list would stay unfiltered (LICENSE
+// still present) and the assertion fails.
+func TestExplorerFinderFiltersFileList(t *testing.T) {
+	g := captureFrame(t, 80, 30, "/util\rq", 6*time.Second)
+	joined := ""
+	for y := 0; y < 30; y++ {
+		joined += g.RowText(y) + "\n"
+	}
+	if !strings.Contains(joined, "util.go") {
+		t.Errorf("finder result missing util.go:\n%s", joined)
+	}
+	if strings.Contains(joined, "LICENSE") {
+		t.Errorf("finder did not filter /LICENSE out of the list:\n%s", joined)
+	}
+}

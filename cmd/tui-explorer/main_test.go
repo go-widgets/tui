@@ -131,15 +131,135 @@ func TestHelpToggleFlipsVisible(t *testing.T) {
 		t.Fatal("second ? did not hide help")
 	}
 }
-func TestSearchToggleFlipsVisible(t *testing.T) {
+// TestSearchOpenFilterAccept covers the finder happy path: "/" opens it, typing
+// through the capture filters the list, and Enter accepts + keeps the matches.
+func TestSearchOpenFilterAccept(t *testing.T) {
 	s := newState()
-	s.keys()["/"](tui.NewApp())
-	if !s.searchPopover.Visible {
-		t.Fatal("/ did not show search")
+	a := tui.NewApp()
+	s.app = a
+
+	s.keys()["/"](a)
+	if !s.searching || !s.searchPopover.Visible || a.InputTarget != s.capture {
+		t.Fatalf("/ did not open finder: searching=%v visible=%v target=%v",
+			s.searching, s.searchPopover.Visible, a.InputTarget == s.capture)
 	}
-	s.keys()["/"](tui.NewApp())
-	if s.searchPopover.Visible {
-		t.Fatal("second / did not hide search")
+	// Type "util" via the capture — only /src/util.go matches.
+	for _, r := range "util" {
+		s.capture.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: string(r)})
+	}
+	if len(s.fileList.Items) != 1 || s.fileList.Items[0] != "/src/util.go" {
+		t.Fatalf("filter: items = %v, want [/src/util.go]", s.fileList.Items)
+	}
+	if !strings.Contains(s.content.Text(), "util") {
+		t.Errorf("preview did not follow the filtered selection: %q", s.content.Text())
+	}
+	// Enter accepts: finder closes, InputTarget released, filtered list kept.
+	s.keys()["Enter"](a)
+	if s.searching || s.searchPopover.Visible || a.InputTarget != nil {
+		t.Fatalf("Enter did not accept: searching=%v visible=%v target=%v",
+			s.searching, s.searchPopover.Visible, a.InputTarget)
+	}
+	if len(s.fileList.Items) != 1 {
+		t.Errorf("accept did not keep the filtered list: %v", s.fileList.Items)
+	}
+}
+
+// TestSearchCancelRestores covers Escape: the finder closes and the full list
+// comes back. The capture.Draw no-op and an empty-query (match-all) branch are
+// exercised too.
+func TestSearchCancelRestores(t *testing.T) {
+	s := newState()
+	a := tui.NewApp()
+	s.app = a
+	s.capture.Draw(nil, nil) // input-only widget
+
+	s.keys()["/"](a)
+	// Empty query matches everything.
+	if len(s.fileList.Items) != len(s.paths) {
+		t.Fatalf("empty query filtered: %d/%d", len(s.fileList.Items), len(s.paths))
+	}
+	// A no-match query empties the list.
+	s.search.Text = "zzz"
+	s.applyFilter()
+	if len(s.fileList.Items) != 0 {
+		t.Fatalf("no-match query: items = %v", s.fileList.Items)
+	}
+	if !strings.Contains(s.content.Text(), "no selection") {
+		t.Errorf("empty match set should show (no selection): %q", s.content.Text())
+	}
+	// Escape restores the full list.
+	s.keys()["Escape"](a)
+	if s.searching || len(s.fileList.Items) != len(s.paths) {
+		t.Fatalf("Escape did not restore: searching=%v items=%d", s.searching, len(s.fileList.Items))
+	}
+	// Escape / Enter when not searching are inert (guarded branches).
+	s.keys()["Escape"](a)
+	before := s.fileList.Selected
+	s.keys()["Enter"](a)
+	if s.fileList.Selected != before {
+		t.Errorf("Enter (not searching) mutated selection")
+	}
+}
+
+// TestFileAndViewMenuActions covers the newly-cabled File (Open / Reload / Quit)
+// and View (Toggle line numbers / Toggle sidebar / Refresh) dropdown actions.
+func TestFileAndViewMenuActions(t *testing.T) {
+	s := newState()
+
+	// File → Open (row 0) and Reload (row 1) both refresh the preview.
+	s.fileList.Selected = 2 // /docs/README.md
+	s.fileDropdown.ItemActions[0]()
+	if !strings.Contains(s.content.Text(), "Project") {
+		t.Errorf("File → Open did not preview: %q", s.content.Text())
+	}
+	s.content.SetText("stale")
+	s.fileDropdown.ItemActions[1]()
+	if !strings.Contains(s.content.Text(), "Project") {
+		t.Errorf("File → Reload did not refresh: %q", s.content.Text())
+	}
+	// File → Quit (row 2) fires the late-bound quit; nil quit is a no-op.
+	s.fileDropdown.ItemActions[2]() // s.quit unset — must not panic
+	called := 0
+	s.quit = func() { called++ }
+	s.fileDropdown.ItemActions[2]()
+	if called != 1 {
+		t.Errorf("File → Quit did not fire s.quit: %d", called)
+	}
+
+	// View → Toggle line numbers (row 0).
+	before := s.content.ShowGutter
+	s.viewDropdown.ItemActions[0]()
+	if s.content.ShowGutter == before {
+		t.Error("View → Toggle line numbers did not flip ShowGutter")
+	}
+	// View → Toggle sidebar (row 1): collapse to 0, then restore to 30.
+	s.body.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 80, H: 20})
+	s.viewDropdown.ItemActions[1]()
+	if s.body.LeftFrac != 0 {
+		t.Errorf("Toggle sidebar did not collapse: LeftFrac=%d", s.body.LeftFrac)
+	}
+	s.viewDropdown.ItemActions[1]()
+	if s.body.LeftFrac != 30 {
+		t.Errorf("Toggle sidebar did not restore: LeftFrac=%d", s.body.LeftFrac)
+	}
+	// View → Refresh (row 2) is a syncContent alias.
+	s.viewDropdown.ItemActions[2]()
+}
+
+// TestSearchGuardsLetterKeys verifies q / ? are inert while the finder is open
+// so they reach the query entry rather than quitting / toggling help.
+func TestSearchGuardsLetterKeys(t *testing.T) {
+	s := newState()
+	a := tui.NewApp()
+	s.app = a
+	s.keys()["/"](a)
+	s.keys()["q"](a) // must NOT quit while searching
+	if a.IsQuitting() {
+		t.Error("q quit the app while the finder was open")
+	}
+	s.keys()["?"](a) // must NOT toggle help while searching
+	if s.helpPopover.Visible {
+		t.Error("? toggled help while the finder was open")
 	}
 }
 
