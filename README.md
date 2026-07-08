@@ -232,6 +232,20 @@ go run ./cmd/tui-catalogue
 go run ./cmd/tui-catalogue --cols=100 --rows=25 --theme=dark
 ```
 
+To showcase the **cell-native `tui.*` widget set itself** (the catalog
+above renders the *pixel* toolkit widgets), run the `tui-widgets`
+gallery — one labelled slot per widget, every glyph exactly one cell:
+
+```bash
+# Gallery of all cell-native tui widgets (Button, Table, TreeView,
+# Notebook, Scale, Entry, Popover, VBox, HSplit, …)
+go run ./cmd/tui-widgets | less -R
+
+# One widget at a larger scale, or list the names
+go run ./cmd/tui-widgets --widget=table --cols=50 --rows=8
+go run ./cmd/tui-widgets --list
+```
+
 Internally uses `tui.RenderToolkit` (the bridge that accepts
 `toolkit.Widget` and translates `toolkit.Theme` to what
 `painter.CellPainter` expects) so the on-screen widgets are the
