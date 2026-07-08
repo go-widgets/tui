@@ -42,6 +42,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
 )
@@ -92,6 +93,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	st.refreshStatus()
 
 	app := newAppFunc()
+	st.app = app // enables palette InputTarget routing
 	app.Root = st.root
 	if *themeName == "dark" {
 		app.Theme = toolkit.DefaultDark()
@@ -126,7 +128,9 @@ type state struct {
 	statusbar    *toolkit.Label
 	menuBar      *tui.MenuBar
 	palette      *tui.Popover
-	paletteEn    *toolkit.SearchEntry
+	paletteEn    *tui.Entry
+	capture      *paletteCapture // App.InputTarget while the palette is open
+	app          *tui.App        // late-bound in run() for InputTarget routing
 	fileDropdown *tui.MenuDropdown
 	editDropdown *tui.MenuDropdown
 	viewDropdown *tui.MenuDropdown
@@ -156,11 +160,12 @@ func newState() *state {
 
 	statusbar := toolkit.NewLabel("VIEW  |  *scratch*  |  1:1")
 
-	paletteEn := toolkit.NewSearchEntry("")
+	paletteEn := &tui.Entry{Placeholder: "save · quit · new · e <path> · find <text>"}
 	palette := &tui.Popover{
 		Title: "Command palette",
-		Body:  []string{}, // populated when the user types via paletteEn
+		Body:  []string{}, // mirrors paletteEn while the palette is open
 	}
+	capture := &paletteCapture{entry: paletteEn, pop: palette}
 
 	// Forward-declared so state's `quit` closure can be captured
 	// inside the fileDropdown before newState() returns.
@@ -168,12 +173,12 @@ func newState() *state {
 
 	fileDropdown := &tui.MenuDropdown{
 		Title:   "File",
-		Body:    []string{"New       (stub)", "Open      (stub)", "Save      Ctrl+S", "Quit      q"},
+		Body:    []string{"New       ", "Open      :e <path>", "Save      Ctrl+S", "Quit      q"},
 		AnchorY: 1,
 	}
 	fileDropdown.ItemActions = []func(){
-		nil, // New — stub
-		nil, // Open — stub
+		func() { s.newBuffer() },
+		func() { s.openPalettePrefill("e ") },
 		func() { _ = s.save() },
 		func() {
 			if s.quit != nil {
@@ -270,6 +275,7 @@ func newState() *state {
 		menuBar:      mb,
 		palette:      palette,
 		paletteEn:    paletteEn,
+		capture:      capture,
 		fileDropdown: fileDropdown,
 		editDropdown: editDropdown,
 		viewDropdown: viewDropdown,
@@ -320,10 +326,71 @@ func (s *state) setMode(m mode) {
 	s.mode = m
 	if m == modePalette {
 		s.palette.Visible = true
+		s.palette.Body = []string{"> " + s.paletteEn.Text}
+		if s.app != nil {
+			s.app.InputTarget = s.capture // route typing into the palette entry
+		}
 	} else {
 		s.palette.Visible = false
+		if s.app != nil {
+			s.app.InputTarget = nil
+		}
 	}
 	s.refreshStatus()
+}
+
+// paletteCapture is the App.InputTarget while the command palette is open: it
+// forwards each keystroke to the entry and mirrors the entry's text into the
+// palette popover so the user sees the command as they type. It is never drawn
+// (input-only), so Draw is a no-op.
+type paletteCapture struct {
+	toolkit.Base
+	entry *tui.Entry
+	pop   *tui.Popover
+}
+
+func (c *paletteCapture) Draw(painter.Painter, *toolkit.Theme) {}
+
+func (c *paletteCapture) OnEvent(ev toolkit.Event) {
+	c.entry.OnEvent(ev)
+	c.pop.Body = []string{"> " + c.entry.Text}
+}
+
+// newBuffer resets the editor to a fresh, unnamed, clean buffer.
+func (s *state) newBuffer() {
+	s.tv.SetText("")
+	s.tv.Filename = ""
+	s.file = ""
+	s.dirty = false
+	s.refreshStatus()
+}
+
+// openFile loads path into the buffer via the readFile seam; on a read error the
+// buffer is left unchanged and the error is returned.
+func (s *state) openFile(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	body, err := s.readFile(path)
+	if err != nil {
+		return err
+	}
+	s.file = path
+	s.tv.Filename = path
+	s.tv.SetText(string(body))
+	s.dirty = false
+	s.refreshStatus()
+	return nil
+}
+
+// openPalettePrefill opens the command palette with prefix already typed (the
+// caret parked at the end), so "File → Open" drops the user straight into a
+// ":e " command ready for a path.
+func (s *state) openPalettePrefill(prefix string) {
+	s.paletteEn.Text = prefix
+	s.paletteEn.Cursor = len([]rune(prefix))
+	s.setMode(modePalette)
 }
 
 // undo / redo forward the underlying TextEditor's Ctrl+Z / Ctrl+Y
@@ -365,8 +432,14 @@ func (s *state) runCommand(a *tui.App, cmd string) error {
 		return s.save()
 	case cmd == "quit", cmd == "q":
 		a.Quit()
+	case cmd == "new":
+		s.newBuffer()
 	case strings.HasPrefix(cmd, "find "):
 		s.tv.Find(strings.TrimSpace(strings.TrimPrefix(cmd, "find ")))
+	case strings.HasPrefix(cmd, "e "):
+		return s.openFile(strings.TrimPrefix(cmd, "e "))
+	case strings.HasPrefix(cmd, "open "):
+		return s.openFile(strings.TrimPrefix(cmd, "open "))
 	}
 	return nil
 }
@@ -419,6 +492,7 @@ func (s *state) keys() map[string]func(*tui.App) {
 			if s.mode == modePalette {
 				_ = s.runCommand(a, s.paletteEn.Text)
 				s.paletteEn.Text = ""
+				s.paletteEn.Cursor = 0
 				s.setMode(modeView)
 				a.Consume()
 			}

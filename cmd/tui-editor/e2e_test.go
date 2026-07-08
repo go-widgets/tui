@@ -363,6 +363,48 @@ func TestEditorKeyboardCtrlZRefreshesStatus(t *testing.T) {
 	}
 }
 
+// TestEditorPaletteTypesAndRunsCommand is the end-to-end proof that the command
+// palette actually accepts typed input (it was a dead stub before App.InputTarget
+// routed keystrokes into its entry): open the palette with Ctrl+P, type "quit",
+// press Enter, and the editor must exit. If the palette input were still inert,
+// paletteEn.Text would stay empty, runCommand("") would no-op, and the process
+// would hang until the timeout. It also asserts the palette echoed "> quit" so
+// the captured frames prove the typing was mirrored cell-for-cell.
+func TestEditorPaletteTypesAndRunsCommand(t *testing.T) {
+	bin := buildBinary(t)
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: 30, Cols: 80})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, ptmx); close(done) }()
+	go func() {
+		write := func(s string) {
+			time.Sleep(150 * time.Millisecond)
+			_, _ = ptmx.Write([]byte(s))
+		}
+		write("\x10") // Ctrl+P → open the command palette
+		write("quit") // typed command (routed into the palette entry)
+		write("\r")   // Enter → run the command → a.Quit()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("editor did not exit — palette did not run the typed 'quit' command")
+	}
+	_ = c.Wait()
+
+	// Cell-level proof: a frame after typing showed the mirrored "> quit".
+	if s := stripANSI(buf.Bytes()); !strings.Contains(s, "> quit") {
+		t.Errorf("captured frames never echoed the typed palette command '> quit'.\n---\n%s", s)
+	}
+}
+
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
 func stripANSI(b []byte) string { return ansiRE.ReplaceAllString(string(b), "") }

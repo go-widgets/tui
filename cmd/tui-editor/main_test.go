@@ -743,9 +743,17 @@ func TestNewStateFileSaveActionCallsSaveSeam(t *testing.T) {
 	if !called {
 		t.Error("File → Save row 2 did not call writeFile seam")
 	}
-	// Stub rows 0, 1 stay nil.
-	if s.fileDropdown.ItemActions[0] != nil || s.fileDropdown.ItemActions[1] != nil {
-		t.Error("New/Open expected nil")
+	// Row 0 (New) resets to a fresh scratch buffer.
+	s.tv.SetText("dirty content")
+	s.file = "/tmp/mock"
+	s.fileDropdown.ItemActions[0]()
+	if s.tv.Text() != "" || s.file != "" {
+		t.Errorf("File → New did not reset buffer: text=%q file=%q", s.tv.Text(), s.file)
+	}
+	// Row 1 (Open) drops into the palette prefilled with an ":e " command.
+	s.fileDropdown.ItemActions[1]()
+	if s.mode != modePalette || s.paletteEn.Text != "e " {
+		t.Errorf("File → Open: mode=%v text=%q, want modePalette/\"e \"", s.mode, s.paletteEn.Text)
 	}
 }
 
@@ -777,6 +785,89 @@ func TestNewStateViewCommandPaletteActionSwitchesMode(t *testing.T) {
 	}
 	if !s.palette.Visible {
 		t.Error("palette not marked visible after menu action")
+	}
+}
+
+// TestPaletteCaptureAndInputTarget covers the modal command palette: entering
+// palette mode routes App.InputTarget to the capture, typing through the capture
+// edits the entry and mirrors into the popover, and leaving clears the target.
+func TestPaletteCaptureAndInputTarget(t *testing.T) {
+	s := newState()
+	a := tui.NewApp()
+	s.app = a
+
+	s.setMode(modePalette)
+	if a.InputTarget != s.capture {
+		t.Fatal("palette mode did not route InputTarget to the capture")
+	}
+	s.capture.Draw(nil, nil) // input-only widget: Draw is a no-op
+	s.capture.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "h"})
+	s.capture.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "i"})
+	if s.paletteEn.Text != "hi" {
+		t.Errorf("capture did not edit the entry: %q", s.paletteEn.Text)
+	}
+	if len(s.palette.Body) != 1 || s.palette.Body[0] != "> hi" {
+		t.Errorf("capture did not mirror into the popover: %v", s.palette.Body)
+	}
+
+	s.setMode(modeView)
+	if a.InputTarget != nil {
+		t.Error("leaving palette mode did not clear InputTarget")
+	}
+}
+
+// TestRunCommandNewOpen covers the palette's "new", "e <path>" and "open <path>"
+// commands plus openFile's empty-path and read-error branches.
+func TestRunCommandNewOpen(t *testing.T) {
+	s := newState()
+	a := tui.NewApp()
+
+	// "new" resets to a fresh scratch buffer.
+	s.tv.SetText("stuff")
+	s.file = "x"
+	_ = s.runCommand(a, "new")
+	if s.tv.Text() != "" || s.file != "" {
+		t.Errorf("new: text=%q file=%q", s.tv.Text(), s.file)
+	}
+
+	// "e <path>" loads via the readFile seam.
+	s.readFile = func(p string) ([]byte, error) {
+		if p != "/doc.txt" {
+			t.Errorf("readFile path = %q", p)
+		}
+		return []byte("loaded"), nil
+	}
+	if err := s.runCommand(a, "e /doc.txt"); err != nil {
+		t.Fatalf("e: %v", err)
+	}
+	if s.tv.Text() != "loaded" || s.file != "/doc.txt" {
+		t.Errorf("e: text=%q file=%q", s.tv.Text(), s.file)
+	}
+
+	// "open <path>" is an alias.
+	s.readFile = func(string) ([]byte, error) { return []byte("again"), nil }
+	_ = s.runCommand(a, "open /other")
+	if s.tv.Text() != "again" {
+		t.Errorf("open: %q", s.tv.Text())
+	}
+
+	// An all-whitespace path is a no-op (readFile must not be called).
+	s.readFile = func(string) ([]byte, error) {
+		t.Fatal("readFile called for an empty path")
+		return nil, nil
+	}
+	if err := s.openFile("   "); err != nil {
+		t.Errorf("empty openFile: %v", err)
+	}
+
+	// A read error leaves the buffer unchanged and is returned.
+	s.tv.SetText("keep")
+	s.readFile = func(string) ([]byte, error) { return nil, errors.New("nope") }
+	if err := s.openFile("/bad"); err == nil {
+		t.Error("openFile did not return the read error")
+	}
+	if s.tv.Text() != "keep" {
+		t.Errorf("errored open changed the buffer: %q", s.tv.Text())
 	}
 }
 
