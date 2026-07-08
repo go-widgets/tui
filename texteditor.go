@@ -436,10 +436,10 @@ func (t *TextEditor) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 }
 
-// OnEvent applies one input event: character insert, Backspace, Enter, Ctrl+Z
-// (undo) / Ctrl+Y (redo) -- all no-ops when ReadOnly -- the arrow keys, or a
-// click (which positions the caret past the gutter). Re-highlights after any
-// change.
+// OnEvent applies one input event: character insert, Backspace, Delete, Enter,
+// Ctrl+Z/Y (undo/redo), Ctrl+X/V (cut/paste) -- all no-ops when ReadOnly -- the
+// arrow / Home / End / PageUp / PageDown navigation keys, or a click / drag
+// (caret + selection). Re-highlights after any change.
 func (t *TextEditor) OnEvent(ev toolkit.Event) {
 	if len(t.Lines) == 0 {
 		t.Lines = []string{""}
@@ -513,6 +513,33 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 				t.CursorCol++
 			}
 			t.selActive = false
+		case "Home":
+			t.CursorCol = 0
+			t.selActive = false
+		case "End":
+			t.CursorCol = len(t.Lines[t.CursorLine])
+			t.selActive = false
+		case "PageUp":
+			t.CursorLine -= t.page()
+			if t.CursorLine < 0 {
+				t.CursorLine = 0
+			}
+			t.clampCol()
+			t.selActive = false
+		case "PageDown":
+			t.CursorLine += t.page()
+			if t.CursorLine > len(t.Lines)-1 {
+				t.CursorLine = len(t.Lines) - 1
+			}
+			t.clampCol()
+			t.selActive = false
+		case "Delete":
+			if !t.ReadOnly {
+				t.pushUndo()
+				if !t.dropSelectionForEdit() {
+					t.deleteForward()
+				}
+			}
 		}
 	case toolkit.EventClick:
 		// A click positions the caret and drops the anchor there; a subsequent
@@ -532,6 +559,28 @@ func (t *TextEditor) OnEvent(ev toolkit.Event) {
 func (t *TextEditor) clampCol() {
 	if t.CursorCol > len(t.Lines[t.CursorLine]) {
 		t.CursorCol = len(t.Lines[t.CursorLine])
+	}
+}
+
+// page is the number of lines a PageUp/PageDown moves the caret: one viewport
+// minus a line of overlap, at least 1.
+func (t *TextEditor) page() int {
+	if h := t.Bounds().H - 1; h > 1 {
+		return h
+	}
+	return 1
+}
+
+// deleteForward removes the character after the caret, or joins the next line
+// when the caret is at end-of-line. The caller records undo.
+func (t *TextEditor) deleteForward() {
+	line := t.Lines[t.CursorLine]
+	switch {
+	case t.CursorCol < len(line):
+		t.Lines[t.CursorLine] = line[:t.CursorCol] + line[t.CursorCol+1:]
+	case t.CursorLine < len(t.Lines)-1:
+		t.Lines[t.CursorLine] = line + t.Lines[t.CursorLine+1]
+		t.Lines = append(t.Lines[:t.CursorLine+1], t.Lines[t.CursorLine+2:]...)
 	}
 }
 
