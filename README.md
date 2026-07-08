@@ -103,6 +103,49 @@ The `cmd/tui-explorer` + `cmd/tui-editor` demos illustrate the
 pattern: they use local `packedVBox`, `hSplit`, `fileList`
 helpers instead of the pixel-tuned toolkit equivalents.
 
+## `tui.TextEditor`
+
+A cell-native, **read-write** code editor widget with syntax highlighting, a
+line-number gutter, undo/redo, search, and selection — the buffer behind
+`cmd/tui-editor` (read-write) and `cmd/tui-explorer`'s preview (`ReadOnly`).
+Being a `painter.Painter` consumer, the *same* widget renders to a terminal
+cell grid (TUI) **and** an RGBA pixel buffer (WUI/GUI) with no code change.
+
+```go
+ed := tui.NewTextEditor()   // gutter on, one empty line
+ed.Filename = "main.go"     // extension picks the syntax language
+ed.SetText(src)
+ed.Focused = true
+app.Root = ed               // it is a toolkit.Widget
+```
+
+Fields: `Filename` (drives the highlighter's language; `""` = plain),
+`ReadOnly` (viewer mode — navigation still works, edits are ignored),
+`ShowGutter` (line numbers), `Focused` (draws the caret). The viewport scrolls
+to follow the caret automatically.
+
+Keys (delivered through `OnEvent`):
+
+| Key | Action |
+|-----|--------|
+| printable · `Enter` · `Backspace` · `Delete` | insert · split line · delete back / forward |
+| `←` `→` `↑` `↓` | move the caret |
+| `Home` · `End` | line start · line end |
+| `PageUp` · `PageDown` | move one viewport |
+| `Tab` · `Shift+Tab` | indent · dedent (caret line or whole selection) |
+| `Alt+↑` · `Alt+↓` | move the current line up · down |
+| `Ctrl+Z` · `Ctrl+Y` | undo · redo |
+| `Ctrl+X` · `Ctrl+V` | cut · paste |
+| mouse click · drag | position caret · extend selection |
+
+Methods: `SetText` / `Text`, `Find` / `FindNext`, `Replace` / `ReplaceAll`,
+`Copy` / `Cut` / `Paste`, `SelectedText` / `DeleteSelection`.
+
+Highlighting lives in the `tui/syntax` sub-package and covers Go (via the
+standard library's `go/scanner`), JavaScript/TypeScript, Python, Ruby, shell,
+C/C++, Rust, JSON, YAML, HCL, TOML, LaTeX and Markdown — with **no external
+dependency**. `tui.SyntaxInk` maps a token kind to a theme-aware colour.
+
 ## Sizing
 
 Two variants, take your pick:
