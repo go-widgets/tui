@@ -14,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-widgets/painter"
 	"github.com/go-widgets/toolkit"
 	"github.com/go-widgets/tui"
 )
@@ -226,6 +225,7 @@ func TestRunCommandQuit(t *testing.T) {
 		t.Fatal("runCommand(quit) did not trigger Quit")
 	}
 }
+
 func TestRunCommandQAlias(t *testing.T) {
 	s := newState()
 	a := tui.NewApp()
@@ -301,6 +301,7 @@ func TestIBindingEntersEditFromView(t *testing.T) {
 		t.Fatalf("i in view mode: mode = %v, want modeEdit", s.mode)
 	}
 }
+
 func TestIBindingIgnoredInEditMode(t *testing.T) {
 	s := newState()
 	s.setMode(modeEdit)
@@ -319,6 +320,7 @@ func TestEscapeReturnsToViewFromEdit(t *testing.T) {
 		t.Fatalf("Escape from edit: mode = %v, want modeView", s.mode)
 	}
 }
+
 func TestEscapeReturnsToViewFromPalette(t *testing.T) {
 	s := newState()
 	s.setMode(modePalette)
@@ -327,6 +329,7 @@ func TestEscapeReturnsToViewFromPalette(t *testing.T) {
 		t.Fatalf("Escape from palette: mode = %v, want modeView", s.mode)
 	}
 }
+
 func TestEscapeInViewIsNoop(t *testing.T) {
 	s := newState()
 	s.keys()["Escape"](tui.NewApp())
@@ -350,6 +353,7 @@ func TestCtrlSSavesInAnyMode(t *testing.T) {
 		t.Fatal("Ctrl+S did not invoke save")
 	}
 }
+
 func TestCtrlSSaveErrorIsSilentlyIgnored(t *testing.T) {
 	// Ctrl+S handler swallows the error (surfaced later in the palette
 	// or on retry). Verify no panic.
@@ -373,6 +377,7 @@ func TestCtrlPFromView(t *testing.T) {
 		t.Fatal("Ctrl+P did not make the palette visible")
 	}
 }
+
 func TestCtrlPInPaletteIsNoop(t *testing.T) {
 	s := newState()
 	s.setMode(modePalette)
@@ -446,6 +451,7 @@ func TestEnterInPaletteRunsQuitCommand(t *testing.T) {
 		t.Errorf("paletteEn.Text = %q, want cleared", s.paletteEn.Text)
 	}
 }
+
 func TestEnterOutsidePaletteIsNoop(t *testing.T) {
 	s := newState()
 	s.setMode(modeEdit)
@@ -582,168 +588,6 @@ func TestDefaultRunAppInvokesRun(t *testing.T) {
 	}
 }
 
-// TestPackedVBoxLayoutHeaderBodyFooter drives the local layout
-// helper directly: given a 80×30 bounds, header must land at y=0
-// with H=1, footer at y=29 with H=1, body between. Catches the
-// regression that shipped in v0.3.0 / v0.3.1 where a plain
-// toolkit.VBox distributed each child equally, wrecking the
-// interactive demo's chrome.
-func TestPackedVBoxLayoutHeaderBodyFooter(t *testing.T) {
-	h := toolkit.NewLabel("H")
-	b := toolkit.NewLabel("B")
-	f := toolkit.NewLabel("F")
-	p := &packedVBox{header: h, body: b, footer: f, headerH: 1, footerH: 1}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 80, H: 30})
-
-	if got := h.Bounds(); got.Y != 0 || got.H != 1 || got.W != 80 {
-		t.Errorf("header bounds = %+v, want (0,0,80,1)", got)
-	}
-	if got := f.Bounds(); got.Y != 29 || got.H != 1 || got.W != 80 {
-		t.Errorf("footer bounds = %+v, want (0,29,80,1)", got)
-	}
-	if got := b.Bounds(); got.Y != 1 || got.H != 28 || got.W != 80 {
-		t.Errorf("body bounds = %+v, want (0,1,80,28)", got)
-	}
-}
-
-// TestPackedVBoxHandlesNilChildren covers the nil-guard branches so
-// SetBounds / Draw / OnEvent never panic on partially-populated
-// helpers (a future demo may compose header + body without a footer).
-func TestPackedVBoxHandlesNilChildren(t *testing.T) {
-	p := &packedVBox{}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
-	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
-	p.Draw(pnt, toolkit.DefaultLight())
-	p.OnEvent(toolkit.Event{})
-}
-
-// TestPackedVBoxDrawAllChildren renders every child so their Draw
-// methods are covered through the layout helper's dispatch.
-func TestPackedVBoxDrawAllChildren(t *testing.T) {
-	h := toolkit.NewLabel("H")
-	b := toolkit.NewLabel("B")
-	f := toolkit.NewLabel("F")
-	p := &packedVBox{header: h, body: b, footer: f, headerH: 1, footerH: 1}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 10})
-	pnt := painter.NewPixelPainter(make([]byte, 40*10*4), 40, 10)
-	p.Draw(pnt, toolkit.DefaultLight())
-}
-
-// TestPackedVBoxForwardsEventsToBody covers the OnEvent forwarding
-// branch: an event delivered to packedVBox reaches the body widget.
-// TestPackedVBoxOverlaysRenderAndSize verifies the overlay slot
-// paths: SetBounds sizes each overlay to the padded body inset, and
-// Draw dispatches to every registered overlay.
-func TestPackedVBoxOverlaysRenderAndSize(t *testing.T) {
-	overlay := toolkit.NewLabel("overlay")
-	p := &packedVBox{
-		body:     toolkit.NewLabel("body"),
-		headerH:  0,
-		footerH:  0,
-		overlays: []toolkit.Widget{overlay},
-	}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 40, H: 20})
-	b := overlay.Bounds()
-	if b.W != 32 || b.H != 16 || b.X != 4 || b.Y != 2 {
-		t.Errorf("overlay bounds = %+v, want (4,2,32,16)", b)
-	}
-	pnt := painter.NewPixelPainter(make([]byte, 40*20*4), 40, 20)
-	p.Draw(pnt, toolkit.DefaultLight())
-}
-
-// TestPackedVBoxOverlayClampsMinimalSize covers the "bw < 1" and
-// "bh < 1" guard branches when the total frame is smaller than the
-// header + footer + padding.
-func TestPackedVBoxOverlayClampsMinimalSize(t *testing.T) {
-	overlay := toolkit.NewLabel("o")
-	p := &packedVBox{
-		headerH:  1,
-		footerH:  1,
-		overlays: []toolkit.Widget{overlay},
-	}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 4, H: 4})
-	b := overlay.Bounds()
-	if b.W < 1 || b.H < 1 {
-		t.Errorf("overlay bounds clamped to < 1: %+v", b)
-	}
-}
-
-func TestPackedVBoxForwardsEventsToBody(t *testing.T) {
-	tv := toolkit.NewTextView("")
-	tv.Focused = true
-	p := &packedVBox{body: tv}
-	before := tv.Text()
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventChar, Code: "x"})
-	if tv.Text() == before {
-		t.Fatal("event was not forwarded to body TextView")
-	}
-}
-
-// -----------------------------------------------------------------
-// menuBar (tui-editor local copy)
-// -----------------------------------------------------------------
-
-func TestMenuBarItemXRange(t *testing.T) {
-	mb := &menuBar{Items: []menuItem{
-		{Label: "File"},
-		{Label: "Edit"},
-		{Label: "View"},
-		{Label: "Help"},
-	}}
-	// Item 0: [1, 5)
-	x0, x1 := mb.itemXRange(0)
-	if x0 != 1 || x1 != 5 {
-		t.Errorf("item 0 range = [%d,%d), want [1,5)", x0, x1)
-	}
-	// Item 3: 1 + 3*(4+3) = 22, len 4 → [22, 26)
-	x0, x1 = mb.itemXRange(3)
-	if x0 != 22 || x1 != 26 {
-		t.Errorf("item 3 range = [%d,%d), want [22,26)", x0, x1)
-	}
-	// Out-of-range index.
-	x0, x1 = mb.itemXRange(99)
-	if x0 != -1 || x1 != -1 {
-		t.Errorf("index 99 = (%d,%d), want (-1,-1)", x0, x1)
-	}
-}
-
-func TestMenuBarDrawRendersItems(t *testing.T) {
-	mb := &menuBar{Items: []menuItem{{Label: "X"}}}
-	mb.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 1})
-	pnt := painter.NewPixelPainter(make([]byte, 20*1*4), 20, 1)
-	mb.Draw(pnt, toolkit.DefaultLight())
-	// Empty items still Draws.
-	(&menuBar{}).Draw(pnt, toolkit.DefaultLight())
-}
-
-func TestMenuBarClickFiresOnClick(t *testing.T) {
-	var fired string
-	mb := &menuBar{Items: []menuItem{
-		{Label: "File", OnClick: func() { fired = "File" }},
-		{Label: "Nil"},
-	}}
-	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 0})
-	if fired != "File" {
-		t.Errorf("File click: fired = %q", fired)
-	}
-	fired = ""
-	// Click on nil-callback item — no crash, no fire.
-	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 9, Y: 0})
-	if fired != "" {
-		t.Errorf("nil-cb fired: %q", fired)
-	}
-	// Non-click event ignored.
-	mb.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
-	if fired != "" {
-		t.Errorf("keydown fired: %q", fired)
-	}
-	// Click in gap between items — no fire.
-	mb.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 6, Y: 0})
-	if fired != "" {
-		t.Errorf("gap fired: %q", fired)
-	}
-}
-
 func TestNewStateWiresMenuItemsToDropdowns(t *testing.T) {
 	s := newState()
 	if len(s.menuBar.Items) != 4 {
@@ -751,7 +595,7 @@ func TestNewStateWiresMenuItemsToDropdowns(t *testing.T) {
 	}
 	cases := []struct {
 		idx int
-		d   **menuDropdown
+		d   **tui.MenuDropdown
 	}{
 		{0, &s.fileDropdown},
 		{1, &s.editDropdown},
@@ -762,7 +606,7 @@ func TestNewStateWiresMenuItemsToDropdowns(t *testing.T) {
 	// x-range, Visible must flip true, and clicking twice must close.
 	for i, tc := range cases {
 		s.menuBar.Items[tc.idx].OnClick()
-		wantX, _ := s.menuBar.itemXRange(tc.idx)
+		wantX, _ := s.menuBar.ItemXRange(tc.idx)
 		if (*tc.d).AnchorX != wantX {
 			t.Errorf("item %d dropdown AnchorX = %d, want %d",
 				i, (*tc.d).AnchorX, wantX)
@@ -936,287 +780,6 @@ func TestNewStateViewCommandPaletteActionSwitchesMode(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------
-// menuDropdown (tui-editor local copy)
-// -----------------------------------------------------------------
-
-func TestMenuDropdownSizeAutoFitsBody(t *testing.T) {
-	d := &menuDropdown{Title: "T", Body: []string{"aaaaaa", "bb"}}
-	w, h := d.size()
-	if w != 10 || h != 4 {
-		t.Errorf("size = (%d, %d), want (10, 4)", w, h)
-	}
-	e := &menuDropdown{Title: "X"}
-	_, h = e.size()
-	if h != 3 {
-		t.Errorf("empty-body height = %d, want 3", h)
-	}
-}
-
-func TestMenuDropdownSetBoundsIgnoresParentAndAnchors(t *testing.T) {
-	d := &menuDropdown{Title: "T", Body: []string{"x"}, AnchorX: 22, AnchorY: 1}
-	d.SetBounds(toolkit.Rect{X: 99, Y: 99, W: 99, H: 99})
-	got := d.Bounds()
-	if got.X != 22 || got.Y != 1 {
-		t.Errorf("anchor = (%d, %d), want (22, 1)", got.X, got.Y)
-	}
-	if got.W != 5 {
-		t.Errorf("W = %d, want 5", got.W)
-	}
-}
-
-func TestMenuDropdownHitTestReflectsVisibility(t *testing.T) {
-	d := &menuDropdown{Body: []string{"x"}}
-	d.SetBounds(toolkit.Rect{})
-	if d.HitTest(1, 1) {
-		t.Error("invisible dropdown claimed a hit")
-	}
-	d.Visible = true
-	if !d.HitTest(1, 1) {
-		t.Error("visible dropdown missed a hit inside bounds")
-	}
-	if d.HitTest(1000, 1000) {
-		t.Error("visible dropdown claimed a hit outside bounds")
-	}
-}
-
-func TestMenuDropdownDrawInvisibleIsNoop(t *testing.T) {
-	d := &menuDropdown{Body: []string{"x"}}
-	d.SetBounds(toolkit.Rect{})
-	pnt := painter.NewPixelPainter(make([]byte, 20*10*4), 20, 10)
-	d.Draw(pnt, toolkit.DefaultLight())
-}
-
-func TestMenuDropdownDrawVisibleRendersTitleAndBody(t *testing.T) {
-	d := &menuDropdown{Title: "T", Body: []string{"one", "two"}, Visible: true}
-	pnt := painter.NewPixelPainter(make([]byte, 20*10*4), 20, 10)
-	d.Draw(pnt, toolkit.DefaultLight())
-	// Empty title → title-draw branch skipped.
-	(&menuDropdown{Body: []string{"only"}, Visible: true}).Draw(pnt, toolkit.DefaultLight())
-}
-
-// TestMenuDropdownItemActionFiresOnRowClick covers every branch of
-// the OnEvent handler: action fires, nil-action row, out-of-range,
-// no ItemActions defined, and the non-click ignore path.
-func TestMenuDropdownItemActionFiresOnRowClick(t *testing.T) {
-	fired := -1
-	d := &menuDropdown{
-		Body: []string{"a", "b", "c"},
-		ItemActions: []func(){
-			func() { fired = 0 },
-			nil, // informational row
-			func() { fired = 2 },
-		},
-		Visible: true,
-	}
-	// Body row 0 (local Y=1) fires ItemActions[0].
-	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 1})
-	if fired != 0 || d.Visible {
-		t.Errorf("row 0: fired=%d visible=%v", fired, d.Visible)
-	}
-	// Nil-action row closes but fires nothing.
-	fired = -1
-	d.Visible = true
-	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 2})
-	if fired != -1 || d.Visible {
-		t.Errorf("nil row: fired=%d visible=%v", fired, d.Visible)
-	}
-	// Out-of-range row (past end) closes without firing.
-	fired = -1
-	d.Visible = true
-	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 99})
-	if fired != -1 || d.Visible {
-		t.Errorf("oob row: fired=%d visible=%v", fired, d.Visible)
-	}
-	// Title row (Y=0) → idx=-1 → nothing fires, still closes.
-	fired = -1
-	d.Visible = true
-	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 0})
-	if fired != -1 || d.Visible {
-		t.Errorf("title row: fired=%d visible=%v", fired, d.Visible)
-	}
-	// Dropdown without any ItemActions defined — must not crash.
-	e := &menuDropdown{Body: []string{"a"}, Visible: true}
-	e.OnEvent(toolkit.Event{Kind: toolkit.EventClick, Y: 1})
-	if e.Visible {
-		t.Error("no-actions dropdown did not close on body click")
-	}
-}
-
-func TestMenuDropdownOnEventClickCloses(t *testing.T) {
-	d := &menuDropdown{Visible: true}
-	d.OnEvent(toolkit.Event{Kind: toolkit.EventClick})
-	if d.Visible {
-		t.Error("click did not close dropdown")
-	}
-	d.Visible = true
-	d.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
-	if !d.Visible {
-		t.Error("keydown incorrectly closed dropdown")
-	}
-}
-
-// TestPackedVBoxCapturesDragFromClickTarget — mirrors tui-explorer's
-// capture test for the tui-editor's packedVBox copy.
-func TestPackedVBoxCapturesDragFromClickTarget(t *testing.T) {
-	body := &tui.TextEditor{Lines: []string{"a", "b"}}
-	overlay := &tui.TextEditor{Lines: []string{"o"}}
-	p := &packedVBox{
-		header:   toolkit.NewLabel("H"),
-		body:     body,
-		footer:   toolkit.NewLabel("F"),
-		headerH:  1,
-		footerH:  1,
-		overlays: []toolkit.Widget{overlay},
-	}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
-
-	// Body click captures body.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 1, Y: 5})
-	if p.dragTarget != body {
-		t.Errorf("body click did not capture body")
-	}
-	// Drag lands where body already got clicked; MouseUp releases.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 3, Y: 8})
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 3, Y: 8})
-	if p.dragTarget != nil {
-		t.Fatal("MouseUp did not release capture")
-	}
-
-	// Overlay click captures overlay.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
-	if p.dragTarget != overlay {
-		t.Errorf("overlay click did not capture overlay")
-	}
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 5, Y: 4})
-
-	// Header click captures header.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 0})
-	if p.dragTarget != p.header {
-		t.Errorf("header click did not capture header")
-	}
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 0, Y: 0})
-
-	// Footer click captures footer.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 19})
-	if p.dragTarget != p.footer {
-		t.Errorf("footer click did not capture footer")
-	}
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 0, Y: 19})
-}
-
-// TestPackedVBoxInvisibleOverlayDoesNotClaimClicks — same coverage
-// as tui-explorer's twin test.
-func TestPackedVBoxInvisibleOverlayDoesNotClaimClicks(t *testing.T) {
-	body := &tui.TextEditor{Lines: []string{"line0", "line1", "line2"}}
-	invisible := &cellPopover{Title: "P", Body: []string{"x"}, Visible: false}
-	p := &packedVBox{
-		body:     body,
-		headerH:  1,
-		footerH:  1,
-		overlays: []toolkit.Widget{invisible},
-	}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
-	// X=6 → body col 5 (the editor's 1-cell left pad offsets clicks by 1).
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 6, Y: 4})
-	if body.CursorLine != 2 || body.CursorCol != 5 {
-		t.Errorf("invisible overlay ate the click: cursor = (%d,%d), want (5,2)",
-			body.CursorCol, body.CursorLine)
-	}
-	if p.dragTarget != body {
-		t.Errorf("capture went to overlay, not body: %v", p.dragTarget)
-	}
-	invisible.Visible = true
-	p.dragTarget = nil
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 5, Y: 4})
-	if p.dragTarget != invisible {
-		t.Errorf("visible overlay did NOT claim the click: %v", p.dragTarget)
-	}
-}
-
-func TestPackedVBoxDragWithoutCaptureIsDropped(t *testing.T) {
-	body := &tui.TextEditor{Lines: []string{"a"}}
-	p := &packedVBox{body: body, headerH: 1, footerH: 1}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseDrag, X: 3, Y: 5})
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventMouseUp, X: 3, Y: 5})
-	if p.dragTarget != nil {
-		t.Errorf("stray drag/up mutated dragTarget: %v", p.dragTarget)
-	}
-}
-
-// TestPackedVBoxClickRoutesByHitTest — click routing exercises the
-// header / body / footer band + overlay top-priority.
-func TestPackedVBoxClickRoutesByHitTest(t *testing.T) {
-	body := &tui.TextEditor{Lines: []string{"line0", "line1", "line2"}}
-	overlay := &tui.TextEditor{Lines: []string{"o"}, Focused: true}
-	p := &packedVBox{
-		header:   toolkit.NewLabel("H"),
-		body:     body,
-		footer:   toolkit.NewLabel("F"),
-		headerH:  1,
-		footerH:  1,
-		overlays: []toolkit.Widget{overlay},
-	}
-	// H=20, headerH=1, footerH=1 → body Y ∈ [1,19). Overlay bounds:
-	// bx=4, by=3, ow=12, oh=14 → Y ∈ [3,17), X ∈ [4,16).
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 20})
-
-	// Click INSIDE overlay: local (6, 4) → overlay-local (2, 1); the 1-cell
-	// left pad maps X=2 to col 1.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 6, Y: 4})
-	if overlay.CursorLine != 0 || overlay.CursorCol != 1 {
-		t.Errorf("overlay click: cursor=(%d,%d), want (1,0)", overlay.CursorCol, overlay.CursorLine)
-	}
-	// Body OUTSIDE overlay X-strip: (2, 3) — X=2 < 4 so overlay
-	// skipped. Y=3 in body band → body-local Y=2 → line 2, col 1
-	// (X=2 minus the 1-cell left pad).
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 2, Y: 3})
-	if body.CursorLine != 2 || body.CursorCol != 1 {
-		t.Errorf("body click below overlay: cursor=(%d,%d), want (1,2)", body.CursorCol, body.CursorLine)
-	}
-	// Header row (Y=0) — Label OnEvent no-ops.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 0})
-	// Footer row (Y=19) — Label OnEvent no-ops.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 0, Y: 19})
-}
-
-// TestPackedVBoxClickWithNilHeaderAndFooter covers nil-branch guards.
-func TestPackedVBoxClickWithNilHeaderAndFooter(t *testing.T) {
-	body := &tui.TextEditor{Lines: []string{"aaa"}}
-	p := &packedVBox{body: body, headerH: 1, footerH: 1}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 10})
-	// Body region click. Y=2 → body-local Y=1 → clamps to line 0 (only
-	// 1 line), col 2 (X=3 minus the 1-cell left pad).
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 2})
-	if body.CursorLine != 0 || body.CursorCol != 2 {
-		t.Errorf("body click: cursor=(%d,%d), want (2,0)", body.CursorCol, body.CursorLine)
-	}
-	// Header-band click with nil header — no crash.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 0})
-	// Footer-band click with nil footer — no crash.
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 9})
-	// Body-band click with nil body — no crash.
-	p.body = nil
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 3, Y: 5})
-}
-
-// TestPackedVBoxOverlayClampsMinBoundsInHitTest — ow<1/oh<1 guards.
-func TestPackedVBoxOverlayClampsMinBoundsInHitTest(t *testing.T) {
-	overlay := &tui.TextEditor{Lines: []string{"a"}, Focused: true}
-	p := &packedVBox{
-		headerH:  1,
-		footerH:  1,
-		overlays: []toolkit.Widget{overlay},
-	}
-	// W=6 → ow = -2 → clamped to 1. H=4 → oh = -2 → 1.
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 6, H: 4})
-	p.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 4, Y: 3})
-	if overlay.CursorLine != 0 || overlay.CursorCol != 0 {
-		t.Errorf("min-overlay click: cursor=(%d,%d), want (0,0)", overlay.CursorCol, overlay.CursorLine)
-	}
-}
-
 // TestMainSuccessPath + TestMainErrorPath drive main via the
 // runFunc/osExit seams.
 func TestMainSuccessPath(t *testing.T) {
@@ -1230,6 +793,7 @@ func TestMainSuccessPath(t *testing.T) {
 		t.Fatalf("main() called osExit(%d), want 0", gotCode)
 	}
 }
+
 func TestMainErrorPath(t *testing.T) {
 	origRun, origExit := runFunc, osExit
 	defer func() { runFunc, osExit = origRun, origExit }()
@@ -1240,24 +804,4 @@ func TestMainErrorPath(t *testing.T) {
 	if gotCode != 4 {
 		t.Fatalf("main() called osExit(%d), want 4", gotCode)
 	}
-}
-
-// cellPopover tests.
-func TestCellPopoverInvisibleNoop(t *testing.T) {
-	p := &cellPopover{Title: "T", Body: []string{"a"}, Visible: false}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 30, H: 10})
-	pnt := painter.NewPixelPainter(make([]byte, 30*10*4), 30, 10)
-	p.Draw(pnt, toolkit.DefaultLight())
-}
-func TestCellPopoverVisibleRenders(t *testing.T) {
-	p := &cellPopover{Title: "T", Body: []string{"a", "b"}, Visible: true}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 30, H: 10})
-	pnt := painter.NewPixelPainter(make([]byte, 30*10*4), 30, 10)
-	p.Draw(pnt, toolkit.DefaultLight())
-}
-func TestCellPopoverBodyClampedToBounds(t *testing.T) {
-	p := &cellPopover{Title: "T", Body: []string{"a", "b", "c", "d"}, Visible: true}
-	p.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 5}) // need=7, capped
-	pnt := painter.NewPixelPainter(make([]byte, 20*5*4), 20, 5)
-	p.Draw(pnt, toolkit.DefaultLight())
 }
