@@ -211,6 +211,16 @@ func decodeCSI(params []byte, final byte) (toolkit.Event, bool) {
 		}
 		return toolkit.Event{}, false
 	}
+	// Alt-modified arrows: CSI 1 ; 3 <A|B> (mod 3 = Alt). Used for line-move;
+	// other modifiers/directions stay unrecognised.
+	if string(params) == "1;3" {
+		switch final {
+		case 'A':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Alt+Up"}, true
+		case 'B':
+			return toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Alt+Down"}, true
+		}
+	}
 	if final == '~' {
 		switch string(params) {
 		case "3":

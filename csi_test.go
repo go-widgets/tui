@@ -126,6 +126,8 @@ func TestFeedCSINamedSequences(t *testing.T) {
 		{"Home", []byte{0x1B, '[', 'H'}, "Home"},
 		{"End", []byte{0x1B, '[', 'F'}, "End"},
 		{"ShiftTab", []byte{0x1B, '[', 'Z'}, "Shift+Tab"},
+		{"AltUp", []byte{0x1B, '[', '1', ';', '3', 'A'}, "Alt+Up"},
+		{"AltDown", []byte{0x1B, '[', '1', ';', '3', 'B'}, "Alt+Down"},
 		{"Delete", []byte{0x1B, '[', '3', '~'}, "Delete"},
 		{"PageUp", []byte{0x1B, '[', '5', '~'}, "PageUp"},
 		{"PageDown", []byte{0x1B, '[', '6', '~'}, "PageDown"},
