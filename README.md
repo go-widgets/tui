@@ -112,10 +112,12 @@ occupies one cell — no pixel padding leaking into the layout.
 | `Scale` | draggable slider over `Min..Max`; click / drag / arrow-key stepping |
 | `ProgressBar` | continuous `Fraction` fill with an optional centred label |
 | `ListBox` | scrollable single-select list with `OnSelect` |
+| `TreeView` | collapsible hierarchy (chevrons, keyboard nav, scroll) for file trees / outlines |
 | `MenuBar` | top menu strip; `ItemXRange` for anchoring dropdowns |
 | `MenuDropdown` | anchored, self-sizing dropdown; per-row actions |
 | `Popover` | bordered modal overlay (title + body), hidden unless `Visible` |
 | `Statusbar` | footer strip of segments; last segment fills; lazy `SetSegment` |
+| `Notebook` | tabbed container; label-sized tabs; routes events to the active page |
 | `VBox` | header / body / footer layout with inset, hit-tested overlays + drag-capture |
 | `HSplit` | resizable horizontal split with a draggable grip column |
 
