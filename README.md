@@ -109,12 +109,16 @@ occupies one cell — no pixel padding leaking into the layout.
 | `Entry` | single-line text input with placeholder, horizontal scroll, rune-indexed caret |
 | `Button` | clickable action; `Default` / `Prominent` / `Secondary` styles; hover + press states |
 | `CheckButton` | `[✓]` / `[ ]` boolean toggle with a label |
+| `RadioButton` / `RadioGroup` | `(•)` / `( )` toggle; group for mutual exclusion |
 | `Scale` | draggable slider over `Min..Max`; click / drag / arrow-key stepping |
 | `ProgressBar` | continuous `Fraction` fill with an optional centred label |
+| `LevelBar` | discrete `Value`/`Max` segments (battery / signal / steps) |
 | `ListBox` | scrollable single-select list with `OnSelect` |
 | `TreeView` | collapsible hierarchy (chevrons, keyboard nav, scroll) for file trees / outlines |
+| `Table` | data grid: header, auto/fixed columns, zebra rows, selection, scroll |
 | `MenuBar` | top menu strip; `ItemXRange` for anchoring dropdowns |
 | `MenuDropdown` | anchored, self-sizing dropdown; per-row actions |
+| `Toolbar` | action strip of labelled buttons + separators (below a MenuBar) |
 | `Popover` | bordered modal overlay (title + body), hidden unless `Visible` |
 | `Statusbar` | footer strip of segments; last segment fills; lazy `SetSegment` |
 | `Notebook` | tabbed container; label-sized tabs; routes events to the active page |
