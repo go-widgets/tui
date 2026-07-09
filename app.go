@@ -18,13 +18,6 @@ import (
 	"github.com/go-widgets/toolkit"
 )
 
-// EventTick is the [toolkit.EventKind] the App emits at a caller-
-// configured tick rate. Widgets that animate (Toast, Spinner) match
-// on this kind to advance a frame counter and repaint. The value is
-// deliberately placed above the toolkit's own iota range so it can
-// never collide with a widget-produced Click / KeyDown / Char event.
-const EventTick toolkit.EventKind = 100
-
 // App is an interactive TUI runner. Instantiate one, set [App.Root]
 // to your widget tree, optionally register keybindings + a tick rate,
 // and call [App.Run]. The App handles alt-screen + raw mode, parses
