@@ -29,3 +29,13 @@
 // responsible for the surrounding terminal state (raw mode, alt
 // screen, cursor visibility) if any.
 package tui
+
+import "github.com/go-widgets/toolkit"
+
+// EventTick is the [toolkit.EventKind] the App emits at a caller-configured tick
+// rate. Widgets that animate (e.g. Spinner) match on this kind to advance a
+// frame counter and repaint. The value sits above the toolkit's own iota range
+// so it can never collide with a widget-produced Click / KeyDown / Char event.
+// Defined here (not in the unix-only app.go) so cross-platform widgets can
+// reference it on every backend, including js/wasm.
+const EventTick toolkit.EventKind = 100
