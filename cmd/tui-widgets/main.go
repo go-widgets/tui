@@ -252,5 +252,19 @@ func entries() []entry {
 			t.ReadOnly = true
 			return t
 		}},
+		{"dialog", 34, 6, func() toolkit.Widget {
+			d := tui.NewDialog("Confirm", []string{"Save your changes?"}, "Yes", "No")
+			d.Visible = true
+			return d
+		}},
+		{"spinner", 16, 1, func() toolkit.Widget {
+			return tui.NewSpinner("Loading…")
+		}},
+		{"dropdown", 16, 1, func() toolkit.Widget {
+			return tui.NewDropdown([]string{"UTF-8", "Latin-1", "UTF-16"}, 0)
+		}},
+		{"vsplit", 30, 6, func() toolkit.Widget {
+			return &tui.VSplit{Top: toolkit.NewLabel("top"), Bottom: toolkit.NewLabel("bottom"), TopFrac: 40}
+		}},
 	}
 }
