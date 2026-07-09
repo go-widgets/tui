@@ -142,6 +142,10 @@ occupies one cell — no pixel padding leaking into the layout.
 | `Notebook` | tabbed container; label-sized tabs; routes events to the active page |
 | `VBox` | header / body / footer layout with inset, hit-tested overlays + drag-capture |
 | `HSplit` | resizable horizontal split with a draggable grip column |
+| `VSplit` | resizable vertical split (stacked panes) with a draggable grip row |
+| `Dialog` | modal confirm/prompt box with focusable action buttons (Tab/←→, Enter/Esc) |
+| `Dropdown` | value picker (combobox) — collapsed control expands a selectable list |
+| `Spinner` | animated busy indicator (tick-driven), optional label |
 
 The `cmd/tui-explorer` + `cmd/tui-editor` demos are built from these widgets.
 
