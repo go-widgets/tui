@@ -82,6 +82,19 @@ Both `cmd/` demos use it — the editor's command palette and the
 explorer's incremental file finder route keystrokes into a `tui.Entry`
 this way.
 
+**Form focus** — for a multi-field screen, wire the inputs into a
+`tui.FocusRing`. It gives them a shared keyboard focus: **Tab** advances,
+**Shift+Tab** retreats (both wrapping), a click focuses the field it hits,
+and every other event is forwarded to the focused field. Arrow keys are
+*not* consumed, so a focused `Dropdown`/`Scale` keeps its own behaviour.
+Any `Focusable` (`Entry`, `Button`, `CheckButton`, `RadioButton`) renders
+a focus cue and activates on Enter, so the form is fully keyboard-drivable.
+
+```go
+form := tui.NewFocusRing(nameEntry, wrapCheck, okButton) // Tab walks these
+app.Root = form
+```
+
 Two reference demos ship in `cmd/`:
 
 - `cmd/tui-explorer` — k9s-style file browser (file list + preview
@@ -146,6 +159,7 @@ occupies one cell — no pixel padding leaking into the layout.
 | `Dialog` | modal confirm/prompt box with focusable action buttons (Tab/←→, Enter/Esc) |
 | `Dropdown` | value picker (combobox) — collapsed control expands a selectable list |
 | `Spinner` | animated busy indicator (tick-driven), optional label |
+| `FocusRing` | shared keyboard focus over inputs — Tab/Shift+Tab traversal for forms |
 
 The `cmd/tui-explorer` + `cmd/tui-editor` demos are built from these widgets.
 
