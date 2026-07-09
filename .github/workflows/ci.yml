@@ -57,8 +57,11 @@ jobs:
             exit 1
           fi
 
-      - name: Cross-compile smoke
+      - name: Cross-compile smoke (all 6 64-bit arches + wasm + darwin)
         run: |
+          for arch in amd64 arm64 riscv64 loong64 ppc64le s390x; do
+            echo "== linux/$arch =="
+            GOOS=linux GOARCH=$arch go build ./...
+          done
           GOOS=js     GOARCH=wasm  go build ./...
-          GOOS=linux  GOARCH=arm64 go build ./...
           GOOS=darwin GOARCH=arm64 go build ./...
