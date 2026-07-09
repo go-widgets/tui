@@ -19,7 +19,13 @@ type CheckButton struct {
 	Label    string
 	Checked  bool
 	OnToggle func(checked bool)
+
+	focused bool
 }
+
+// SetFocused implements Focusable — a focused checkbox draws its box in Accent
+// and toggles on Enter.
+func (c *CheckButton) SetFocused(v bool) { c.focused = v }
 
 // checkBoxCells is the width of the "[x] " box prefix, including its trailing
 // space, so the label starts at r.X + checkBoxCells.
@@ -37,6 +43,8 @@ func (c *CheckButton) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	box, ink := "[ ]", theme.Border
 	if c.Checked {
 		box, ink = "[✓]", theme.Accent
+	} else if c.focused {
+		ink = theme.Accent // focus cue on the empty box
 	}
 	toolkit.DrawText(pnt, r.X, r.Y, box, ink)
 	if c.Label != "" {
@@ -44,9 +52,12 @@ func (c *CheckButton) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 }
 
-// OnEvent flips Checked and fires OnToggle on a click; other events are ignored.
+// OnEvent flips Checked and fires OnToggle on a click or an Enter key (so a
+// focused checkbox is keyboard-toggleable); other events are ignored.
 func (c *CheckButton) OnEvent(ev toolkit.Event) {
-	if ev.Kind != toolkit.EventClick {
+	toggle := ev.Kind == toolkit.EventClick ||
+		(ev.Kind == toolkit.EventKeyDown && ev.Code == "Enter")
+	if !toggle {
 		return
 	}
 	c.Checked = !c.Checked

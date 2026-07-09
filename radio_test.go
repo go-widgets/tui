@@ -24,10 +24,15 @@ func TestRadioStandalone(t *testing.T) {
 	if r.Checked || toggles != 2 {
 		t.Fatalf("standalone re-click: checked=%v toggles=%d", r.Checked, toggles)
 	}
-	// Non-click is ignored.
+	// Enter activates a (focused) standalone radio.
 	r.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
-	if toggles != 2 {
-		t.Errorf("keydown toggled: %d", toggles)
+	if !r.Checked || toggles != 3 {
+		t.Errorf("Enter did not activate: checked=%v toggles=%d", r.Checked, toggles)
+	}
+	// A non-activating key is ignored.
+	r.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if toggles != 3 {
+		t.Errorf("non-Enter key toggled: %d", toggles)
 	}
 	// Nil OnToggle must not panic.
 	NewRadioButton("x").OnEvent(toolkit.Event{Kind: toolkit.EventClick})

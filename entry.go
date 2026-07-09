@@ -34,6 +34,9 @@ func NewEntry(initial string) *Entry {
 	return &Entry{Text: initial, Cursor: len([]rune(initial))}
 }
 
+// SetFocused implements Focusable — it drives whether the caret is drawn.
+func (e *Entry) SetFocused(focused bool) { e.Focused = focused }
+
 // avail is the number of cells available for text: the width minus a 1-cell pad
 // on each side (floored at 1).
 func (e *Entry) avail() int {
