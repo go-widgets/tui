@@ -21,9 +21,11 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -716,15 +718,105 @@ func buildBinary(t *testing.T) string {
 // findLastFrame kept exported (via _ =) for downstream refactor.
 var _ = findLastFrame
 
+// syncBuf is a concurrency-safe capture buffer: the pty reader appends via Write
+// while the test polls a decoded snapshot.
+type syncBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuf) Bytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.buf.Bytes()...)
+}
+
+// explorerSession spawns the explorer under a pty with a concurrent capture and
+// drives it by RENDERED STATE (waitForText) rather than fixed sleeps — so a
+// keystroke that depends on a prior mode change (e.g. typing into the finder
+// only after "/" has opened it) can't race under parallel load.
+type explorerSession struct {
+	t          *testing.T
+	ptmx       *os.File
+	cmd        *exec.Cmd
+	buf        *syncBuf
+	done       chan struct{}
+	cols, rows int
+}
+
+func spawnExplorer(t *testing.T, cols, rows int) *explorerSession {
+	t.Helper()
+	bin := buildBinary(t)
+	c := exec.Command(bin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	if err != nil {
+		t.Skipf("pty unavailable: %v", err)
+	}
+	s := &explorerSession{t: t, ptmx: ptmx, cmd: c, buf: &syncBuf{}, done: make(chan struct{}), cols: cols, rows: rows}
+	go func() { _, _ = io.Copy(s.buf, ptmx); close(s.done) }()
+	return s
+}
+
+func (s *explorerSession) close()          { _ = s.ptmx.Close() }
+func (s *explorerSession) send(keys string) { _, _ = s.ptmx.Write([]byte(keys)) }
+func (s *explorerSession) grid() *tui.TermGrid {
+	return tui.DecodeANSI(s.buf.Bytes(), s.cols, s.rows)
+}
+
+// waitForText blocks until some row of the decoded frame contains sub.
+func (s *explorerSession) waitForText(sub string, timeout time.Duration) {
+	s.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		g := s.grid()
+		for y := 0; y < s.rows; y++ {
+			if strings.Contains(g.RowText(y), sub) {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.t.Fatalf("timeout waiting for %q to render", sub)
+}
+
+func (s *explorerSession) waitExit(timeout time.Duration) {
+	s.t.Helper()
+	select {
+	case <-s.done:
+	case <-time.After(timeout):
+		s.t.Fatal("explorer did not exit within timeout")
+	}
+	_ = s.cmd.Wait()
+}
+
 // TestExplorerFinderFiltersFileList is the end-to-end proof that the search
-// finder actually accepts typed input and narrows the list (it was a static
-// "planned" stub before App.InputTarget routed keys into its entry): press '/'
-// to open the finder, type "util", Enter to accept, then 'q' to quit. The final
-// frame must show the file list narrowed to /src/util.go with /LICENSE filtered
-// out. If the finder input were inert, the list would stay unfiltered (LICENSE
-// still present) and the assertion fails.
+// finder accepts typed input and narrows the list (it was a static "planned"
+// stub before App.InputTarget routed keys into its entry): press '/' to open the
+// finder, type "util", Enter to accept, 'q' to quit. The final frame must show
+// the list narrowed to /src/util.go with /LICENSE filtered out.
+//
+// Each step waits on rendered state (finder open, filter applied) so typing
+// can't race ahead of the '/' that opens the finder.
 func TestExplorerFinderFiltersFileList(t *testing.T) {
-	g := captureFrame(t, 80, 30, "/util\rq", 6*time.Second)
+	s := spawnExplorer(t, 80, 30)
+	defer s.close()
+
+	s.waitForText("q: quit", shortTimeout) // footer rendered = App up
+	s.send("/")
+	s.waitForText("Find file", shortTimeout) // finder popover open → typing routes to it
+	s.send("util")
+	s.waitForText("1 match(es)", shortTimeout) // filter narrowed to the single match
+	s.send("\r")                               // accept — keep the filtered list
+	s.send("q")
+	s.waitExit(shortTimeout)
+
+	g := s.grid()
 	joined := ""
 	for y := 0; y < 30; y++ {
 		joined += g.RowText(y) + "\n"
@@ -736,3 +828,5 @@ func TestExplorerFinderFiltersFileList(t *testing.T) {
 		t.Errorf("finder did not filter /LICENSE out of the list:\n%s", joined)
 	}
 }
+
+const shortTimeout = 4 * time.Second
