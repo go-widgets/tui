@@ -26,6 +26,7 @@ type Button struct {
 
 	hovered bool
 	pressed bool
+	focused bool
 }
 
 // ButtonStyle selects a button's resting fill, giving a layout a visual
@@ -52,6 +53,10 @@ func NewButton(label string, onClick func()) *Button {
 func (b *Button) SetHovered(v bool) { b.hovered = v }
 func (b *Button) SetPressed(v bool) { b.pressed = v }
 
+// SetFocused implements Focusable — a focused button highlights (like hover) and
+// activates on Enter.
+func (b *Button) SetFocused(v bool) { b.focused = v }
+
 // Draw paints the face (cycling Surface / SurfaceAlt / Accent by style and
 // interaction state) and the centred label, with an on-accent ink that stays
 // legible over an Accent fill.
@@ -68,7 +73,7 @@ func (b *Button) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	switch {
 	case b.pressed:
 		face, ink = theme.Accent, theme.Background
-	case b.hovered:
+	case b.hovered, b.focused:
 		face = theme.SurfaceAlt
 	}
 	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, face)
@@ -80,9 +85,12 @@ func (b *Button) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 }
 
-// OnEvent fires OnClick on a click; other event kinds are ignored.
+// OnEvent fires OnClick on a click or an Enter key (so a focused button is
+// keyboard-activatable); other events are ignored.
 func (b *Button) OnEvent(ev toolkit.Event) {
-	if ev.Kind == toolkit.EventClick && b.OnClick != nil {
+	activate := ev.Kind == toolkit.EventClick ||
+		(ev.Kind == toolkit.EventKeyDown && ev.Code == "Enter")
+	if activate && b.OnClick != nil {
 		b.OnClick()
 	}
 }

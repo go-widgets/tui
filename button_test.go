@@ -18,13 +18,19 @@ func TestButtonClick(t *testing.T) {
 	if clicks != 1 {
 		t.Fatalf("click count = %d, want 1", clicks)
 	}
-	// Non-click events are ignored.
+	// Enter activates a (focused) button.
 	b.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
-	if clicks != 1 {
-		t.Errorf("keydown fired OnClick: %d", clicks)
+	if clicks != 2 {
+		t.Errorf("Enter did not activate: clicks=%d, want 2", clicks)
 	}
-	// A nil handler is a safe no-op.
+	// A non-activating key is ignored.
+	b.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if clicks != 2 {
+		t.Errorf("non-Enter key activated: %d", clicks)
+	}
+	// A nil handler is a safe no-op (click + Enter).
 	NewButton("x", nil).OnEvent(toolkit.Event{Kind: toolkit.EventClick})
+	NewButton("x", nil).OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
 }
 
 func TestButtonDraw(t *testing.T) {

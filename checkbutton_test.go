@@ -25,10 +25,15 @@ func TestCheckButtonToggle(t *testing.T) {
 	if c.Checked || last || toggles != 2 {
 		t.Fatalf("second click: checked=%v last=%v toggles=%d", c.Checked, last, toggles)
 	}
-	// Non-click events are ignored.
+	// Enter toggles a (focused) checkbox.
 	c.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Enter"})
-	if toggles != 2 {
-		t.Errorf("keydown toggled: %d", toggles)
+	if !c.Checked || toggles != 3 {
+		t.Errorf("Enter did not toggle: checked=%v toggles=%d", c.Checked, toggles)
+	}
+	// A non-activating key is ignored.
+	c.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "Down"})
+	if toggles != 3 {
+		t.Errorf("non-Enter key toggled: %d", toggles)
 	}
 	// A nil handler must not panic.
 	NewCheckButton("x", false).OnEvent(toolkit.Event{Kind: toolkit.EventClick})

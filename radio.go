@@ -20,9 +20,14 @@ type RadioButton struct {
 	Checked  bool
 	OnToggle func(checked bool)
 
-	group *RadioGroup
-	index int
+	group   *RadioGroup
+	index   int
+	focused bool
 }
+
+// SetFocused implements Focusable — a focused radio draws its mark in Accent and
+// activates on Enter.
+func (r *RadioButton) SetFocused(v bool) { r.focused = v }
 
 // radioBoxCells is the width of the "(•) " box prefix incl. its trailing space,
 // so the label starts at r.X + radioBoxCells.
@@ -40,6 +45,8 @@ func (r *RadioButton) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	box, ink := "( )", theme.Border
 	if r.Checked {
 		box, ink = "(•)", theme.Accent
+	} else if r.focused {
+		ink = theme.Accent // focus cue on the empty mark
 	}
 	toolkit.DrawText(pnt, b.X, b.Y, box, ink)
 	if r.Label != "" {
@@ -47,10 +54,12 @@ func (r *RadioButton) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 }
 
-// OnEvent on click routes through the group (siblings clear) if grouped, else
-// toggles Checked locally.
+// OnEvent, on a click or Enter (so a focused radio is keyboard-activatable),
+// routes through the group (siblings clear) if grouped, else toggles locally.
 func (r *RadioButton) OnEvent(ev toolkit.Event) {
-	if ev.Kind != toolkit.EventClick {
+	act := ev.Kind == toolkit.EventClick ||
+		(ev.Kind == toolkit.EventKeyDown && ev.Code == "Enter")
+	if !act {
 		return
 	}
 	if r.group != nil {
