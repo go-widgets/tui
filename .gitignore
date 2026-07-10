@@ -6,8 +6,9 @@
 # component instead of only the binary.
 /tui-explorer
 /tui-editor
-/tui-catalogue
 /tui-snapshot
+/tui-widgets
+/tui-widget-explorer
 
 # Test artefacts
 *.out
