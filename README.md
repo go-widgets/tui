@@ -252,7 +252,16 @@ go run ./cmd/tui-widgets --widget=table --cols=50 --rows=8
 go run ./cmd/tui-widgets --list
 ```
 
-For the interactive demos (`tui.App` powered):
+For an **interactive** tour of the set, run the widget explorer: a live
+`tui.App` with the widget list on the left and a poke-able instance on the
+right (`↑↓` select · `Tab` focus the widget · `Esc` back · mouse to click/
+drag · `q` quit) — type into the Entry, drag the Scale, open the Dropdown:
+
+```bash
+go run ./cmd/tui-widget-explorer
+```
+
+For the interactive reference demos (`tui.App` powered):
 
 ```bash
 # k9s-style file browser with arrow navigation
