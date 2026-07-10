@@ -159,6 +159,10 @@ occupies one cell — no pixel padding leaking into the layout.
 | `Dialog` | modal confirm/prompt box with focusable action buttons (Tab/←→, Enter/Esc) |
 | `Dropdown` | value picker (combobox) — collapsed control expands a selectable list |
 | `Spinner` | animated busy indicator (tick-driven), optional label |
+| `SpinButton` | integer field with ◂/▸ steppers, clamped to `[Min,Max]` |
+| `Expander` | collapsible section — ▾/▸ header reveals/hides a body widget |
+| `Banner` | inline severity message strip (info/success/warning/error) |
+| `Label` | aligned static text (left/center/right) |
 | `FocusRing` | shared keyboard focus over inputs — Tab/Shift+Tab traversal for forms |
 
 The `cmd/tui-explorer` + `cmd/tui-editor` demos are built from these widgets.
