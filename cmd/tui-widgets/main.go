@@ -274,5 +274,14 @@ func entries() []entry {
 		}},
 		{"banner", 30, 1, func() toolkit.Widget { return tui.NewBanner("Saved successfully", tui.BannerSuccess) }},
 		{"label", 20, 1, func() toolkit.Widget { return &tui.Label{Text: "centered label", Align: tui.AlignCenter} }},
+		{"kbd", 10, 1, func() toolkit.Widget { return tui.NewKbd("Ctrl+K") }},
+		{"badge", 5, 1, func() toolkit.Widget { return tui.NewBadge("3") }},
+		{"breadcrumbs", 30, 1, func() toolkit.Widget {
+			return tui.NewBreadcrumbs([]string{"home", "projects", "widgets"})
+		}},
+		{"steps", 38, 1, func() toolkit.Widget {
+			return tui.NewSteps([]string{"Plan", "Build", "Test", "Ship"}, 1)
+		}},
+		{"pagination", 9, 1, func() toolkit.Widget { return tui.NewPagination(8, 3) }},
 	}
 }

@@ -301,5 +301,12 @@ func widgetEntries() []entry {
 		}},
 		{"Banner", func() toolkit.Widget { return tui.NewBanner("Heads up — this is a banner", tui.BannerInfo) }},
 		{"Label", func() toolkit.Widget { return &tui.Label{Text: "A centered label", Align: tui.AlignCenter} }},
+		{"Kbd", func() toolkit.Widget { return tui.NewKbd("Ctrl+K") }},
+		{"Badge", func() toolkit.Widget { return tui.NewBadge("42") }},
+		{"Breadcrumbs", func() toolkit.Widget {
+			return tui.NewBreadcrumbs([]string{"home", "projects", "widgets"})
+		}},
+		{"Steps", func() toolkit.Widget { return tui.NewSteps([]string{"Plan", "Build", "Test", "Ship"}, 1) }},
+		{"Pagination", func() toolkit.Widget { return tui.NewPagination(8, 3) }},
 	}
 }

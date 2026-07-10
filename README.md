@@ -163,6 +163,11 @@ occupies one cell — no pixel padding leaking into the layout.
 | `Expander` | collapsible section — ▾/▸ header reveals/hides a body widget |
 | `Banner` | inline severity message strip (info/success/warning/error) |
 | `Label` | aligned static text (left/center/right) |
+| `Kbd` | keycap for shortcut hints (`Ctrl+K`) |
+| `Badge` | accent pill for a count / short label (`3`) |
+| `Breadcrumbs` | navigation trail (`home › projects › widgets`) |
+| `Steps` | numbered wizard/step indicator, current highlighted |
+| `Pagination` | page selector `‹ Page/Count ›` (click / Left-Right) |
 | `FocusRing` | shared keyboard focus over inputs — Tab/Shift+Tab traversal for forms |
 
 The `cmd/tui-explorer` + `cmd/tui-editor` demos are built from these widgets.
