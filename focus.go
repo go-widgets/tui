@@ -24,6 +24,7 @@ var (
 	_ Focusable = (*Button)(nil)
 	_ Focusable = (*CheckButton)(nil)
 	_ Focusable = (*RadioButton)(nil)
+	_ Focusable = (*SpinButton)(nil)
 )
 
 // FocusRing gives a set of Focusables a shared keyboard focus: Tab advances and
