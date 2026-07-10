@@ -295,5 +295,11 @@ func widgetEntries() []entry {
 			t.SetText("edit me\nsecond line")
 			return t
 		}},
+		{"SpinButton", func() toolkit.Widget { return tui.NewSpinButton(0, 100, 50, 5) }},
+		{"Expander", func() toolkit.Widget {
+			return tui.NewExpander("Details (Enter to toggle)", toolkit.NewLabel("hidden body line"))
+		}},
+		{"Banner", func() toolkit.Widget { return tui.NewBanner("Heads up — this is a banner", tui.BannerInfo) }},
+		{"Label", func() toolkit.Widget { return &tui.Label{Text: "A centered label", Align: tui.AlignCenter} }},
 	}
 }

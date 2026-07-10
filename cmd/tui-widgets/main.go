@@ -266,5 +266,13 @@ func entries() []entry {
 		{"vsplit", 30, 6, func() toolkit.Widget {
 			return &tui.VSplit{Top: toolkit.NewLabel("top"), Bottom: toolkit.NewLabel("bottom"), TopFrac: 40}
 		}},
+		{"spinbutton", 10, 1, func() toolkit.Widget { return tui.NewSpinButton(0, 100, 42, 1) }},
+		{"expander", 24, 4, func() toolkit.Widget {
+			e := tui.NewExpander("Details", toolkit.NewLabel("body line"))
+			e.Expanded = true
+			return e
+		}},
+		{"banner", 30, 1, func() toolkit.Widget { return tui.NewBanner("Saved successfully", tui.BannerSuccess) }},
+		{"label", 20, 1, func() toolkit.Widget { return &tui.Label{Text: "centered label", Align: tui.AlignCenter} }},
 	}
 }
