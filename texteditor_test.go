@@ -432,6 +432,9 @@ func TestTextEditorSelectionMultiLine(t *testing.T) {
 }
 
 func TestTextEditorCopyCutPaste(t *testing.T) {
+	toolkit.SetClipboard(nil) // hermetic: start from the default empty clipboard
+	defer toolkit.SetClipboard(nil)
+
 	e := NewTextEditor()
 	e.SetText("abcdef")
 	e.anchorLine, e.anchorCol, e.selActive = 0, 1, true
@@ -463,21 +466,49 @@ func TestTextEditorCopyCutPaste(t *testing.T) {
 	// Multi-line paste.
 	e.SetText("XY")
 	e.CursorCol = 1
-	e.clip = "a\nb"
+	toolkit.SetClipboardText("a\nb")
 	e.selActive = false
 	e.Paste()
 	if e.Text() != "Xa\nbY" || e.CursorLine != 1 || e.CursorCol != 1 {
 		t.Fatalf("multi-line paste = %q cursor (%d,%d)", e.Text(), e.CursorLine, e.CursorCol)
 	}
 	// Empty clipboard + ReadOnly are no-ops.
-	e.clip = ""
+	toolkit.SetClipboardText("")
 	before := e.Text()
 	e.Paste()
 	e.ReadOnly = true
-	e.clip = "z"
+	toolkit.SetClipboardText("z")
 	e.Paste()
 	if e.Text() != before {
 		t.Errorf("no-op paste mutated: %q", e.Text())
+	}
+
+	// Copy with no active selection is a no-op on the clipboard: it does
+	// not clobber whatever was copied before.
+	toolkit.SetClipboardText("kept")
+	e.ReadOnly = false
+	e.selActive = false
+	if got := e.Copy(); got != "" {
+		t.Errorf("Copy with no selection = %q, want \"\"", got)
+	}
+	if got := toolkit.ClipboardText(); got != "kept" {
+		t.Errorf("empty Copy clobbered clipboard: %q, want %q", got, "kept")
+	}
+
+	// Copy/Paste interop across two independent TextEditor instances via
+	// the process-wide toolkit.Clipboard -- text copied in one is visible
+	// to Paste in the other, unlike the old widget-local clip field.
+	src := NewTextEditor()
+	src.SetText("shared text")
+	src.anchorLine, src.anchorCol, src.selActive = 0, 0, true
+	src.CursorCol = len("shared")
+	src.Copy()
+
+	dst := NewTextEditor()
+	dst.SetText("")
+	dst.Paste()
+	if dst.Text() != "shared" {
+		t.Errorf("cross-widget Paste = %q, want %q", dst.Text(), "shared")
 	}
 }
 

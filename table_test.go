@@ -103,6 +103,129 @@ func TestTableSelectAndNav(t *testing.T) {
 	NewTable([]TableColumn{{Title: "X"}}, [][]string{{"a"}, {"b"}}).OnEvent(vkey("Down"))
 }
 
+// TestTableMultiSelect mirrors ListBox's MultiSelect Ctrl/Shift click model
+// (see toolkit.ListBox) and asserts the resulting highlight at cell
+// precision.
+func TestTableMultiSelect(t *testing.T) {
+	rows := [][]string{{"1"}, {"2"}, {"3"}, {"4"}, {"5"}}
+	tb := NewTable([]TableColumn{{Title: "N"}}, rows)
+	tb.MultiSelect = true
+	tb.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 6}) // bodyH = 5, no scroll
+	var fired []int
+	tb.OnSelect = func(r int) { fired = append(fired, r) }
+
+	click := func(row int, ctrl, shift bool) toolkit.Event {
+		return toolkit.Event{Kind: toolkit.EventClick, Y: row + 1, Ctrl: ctrl, Shift: shift}
+	}
+
+	// Plain click selects only that row + moves the anchor.
+	tb.OnEvent(click(1, false, false))
+	if tb.Selected != 1 || !tb.IsSelected(1) || tb.IsSelected(0) {
+		t.Fatalf("plain click: Selected=%d IsSelected(1)=%v IsSelected(0)=%v", tb.Selected, tb.IsSelected(1), tb.IsSelected(0))
+	}
+
+	// Ctrl-click adds row 3 + moves the anchor without clearing row 1.
+	tb.OnEvent(click(3, true, false))
+	if tb.Selected != 3 || !tb.IsSelected(1) || !tb.IsSelected(3) {
+		t.Fatalf("ctrl-click add: Selected=%d IsSelected(1)=%v IsSelected(3)=%v", tb.Selected, tb.IsSelected(1), tb.IsSelected(3))
+	}
+	// Second Ctrl-click on the same row removes it.
+	tb.OnEvent(click(3, true, false))
+	if tb.IsSelected(3) {
+		t.Fatalf("ctrl-click remove: row 3 still selected")
+	}
+
+	// Shift-click selects the inclusive range from the anchor (3) to the
+	// clicked row (1), replacing the set + leaving the anchor unchanged.
+	tb.OnEvent(click(1, false, true))
+	for i, want := range map[int]bool{0: false, 1: true, 2: true, 3: true, 4: false} {
+		if got := tb.IsSelected(i); got != want {
+			t.Errorf("after shift-click range(1,3): IsSelected(%d) = %v, want %v", i, got, want)
+		}
+	}
+	if tb.Selected != 3 {
+		t.Errorf("shift-click should not move the anchor: Selected = %d, want 3", tb.Selected)
+	}
+	if len(fired) != 4 {
+		t.Errorf("OnSelect fired %d times, want 4 (%v)", len(fired), fired)
+	}
+
+	// Draw at cell precision: rows 1-3 are IsSelected -> Accent background;
+	// row 0 and row 4 are not.
+	theme := toolkit.DefaultLight()
+	cp := painter.NewCellPainter(10, 6)
+	tb.Draw(cp, theme)
+	bg := func(y int) painter.RGBA { return cp.Cells[y*cp.W].Bg }
+	for i, want := range map[int]bool{0: false, 1: true, 2: true, 3: true, 4: false} {
+		got := bg(i+1) == theme.Accent
+		if got != want {
+			t.Errorf("row %d bg==Accent = %v, want %v", i, got, want)
+		}
+	}
+
+	// A click outside the row range is a no-op even in MultiSelect mode.
+	before := tb.SelectedIndices()
+	tb.OnEvent(click(99, false, false))
+	if got := tb.SelectedIndices(); len(got) != len(before) {
+		t.Errorf("out-of-range click in MultiSelect mode changed selection: %v", got)
+	}
+
+	// With MultiSelect false (the default), Ctrl/Shift are ignored entirely:
+	// a plain setSelected happens + the selection set is never touched.
+	single := NewTable([]TableColumn{{Title: "N"}}, rows)
+	single.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 6})
+	single.OnEvent(click(2, true, false))
+	if single.Selected != 2 || single.IsSelected(2) {
+		t.Fatalf("ctrl-click with MultiSelect=false: Selected=%d IsSelected(2)=%v", single.Selected, single.IsSelected(2))
+	}
+}
+
+func TestTableSelectionAPI(t *testing.T) {
+	rows := [][]string{{"1"}, {"2"}, {"3"}, {"4"}}
+	tb := NewTable([]TableColumn{{Title: "N"}}, rows)
+
+	tb.SetSelection(-1, 1, 2, 99)
+	if got := tb.SelectedIndices(); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("SetSelection = %v, want [1 2]", got)
+	}
+
+	tb.ClearSelection()
+	tb.ToggleSelect(0)
+	if !tb.IsSelected(0) {
+		t.Fatalf("ToggleSelect on nil set: row 0 not selected")
+	}
+	tb.ToggleSelect(0)
+	if tb.IsSelected(0) {
+		t.Fatalf("ToggleSelect twice: row 0 still selected")
+	}
+	tb.ToggleSelect(-1)
+	tb.ToggleSelect(99)
+	if len(tb.SelectedIndices()) != 0 {
+		t.Fatalf("out-of-range ToggleSelect mutated selection: %v", tb.SelectedIndices())
+	}
+
+	tb.SelectRange(2, 0)
+	if got := tb.SelectedIndices(); len(got) != 3 || got[0] != 0 || got[2] != 2 {
+		t.Fatalf("SelectRange(2,0) = %v, want [0 1 2]", got)
+	}
+	tb.SelectRange(-5, 99)
+	if got := tb.SelectedIndices(); len(got) != len(rows) {
+		t.Fatalf("SelectRange clamped = %v, want all rows", got)
+	}
+
+	tb.Selected = 2
+	tb.ClearSelection()
+	if len(tb.SelectedIndices()) != 0 || tb.Selected != 2 {
+		t.Fatalf("ClearSelection: indices=%v Selected=%d, want []/2", tb.SelectedIndices(), tb.Selected)
+	}
+
+	empty := NewTable([]TableColumn{{Title: "N"}}, nil)
+	empty.SelectRange(0, 0)
+	if len(empty.SelectedIndices()) != 0 {
+		t.Fatalf("SelectRange on empty table = %v, want []", empty.SelectedIndices())
+	}
+}
+
 // TestCellTextX exercises every Align branch of cellTextX directly, including
 // the "text too wide for the cell" clamp shared by AlignRight/AlignCenter.
 func TestCellTextX(t *testing.T) {

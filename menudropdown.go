@@ -18,25 +18,98 @@ import (
 // informational row: the click still dismisses the menu but runs nothing) and
 // hides the menu.
 //
+// Checkable, Checked and RadioGroup are parallel to Body and mirror
+// toolkit.MenuItem's checkable/radio semantics (see toolkit.Menu): clicking a
+// row whose Checkable is true flips its Checked entry (in addition to still
+// running its ItemActions entry, if any) and the row renders a ✓ glyph in a
+// left-hand gutter while Checked. A row whose RadioGroup is non-zero instead
+// belongs to a mutually exclusive set -- clicking it sets its own Checked to
+// true and clears Checked on every other Body row sharing the same
+// RadioGroup value, rendering a • glyph instead of a check mark; RadioGroup
+// implies checkable behaviour, so Checkable need not also be set. A short or
+// nil slice means "not checkable" / "no radio group" for the missing rows.
+// The gutter is only reserved (shifting every row right) when at least one
+// row is checkable or radio-grouped; a MenuDropdown with no such rows lays
+// out exactly as before this feature existed.
+//
 // A toolkit.Widget rendering through painter.Painter (cell grid / RGBA buffer).
 type MenuDropdown struct {
 	toolkit.Base
 	Title       string
 	Body        []string
 	ItemActions []func() // parallel to Body; nil / short = informational row
+	Checkable   []bool   // parallel to Body; short/nil = not checkable
+	Checked     []bool   // parallel to Body; short/nil = unchecked
+	RadioGroup  []int    // parallel to Body; short/nil or 0 = no radio group
 	Visible     bool
 	AnchorX     int
 	AnchorY     int
 }
 
+// isCheckable reports whether Body row i wants a check/bullet glyph slot --
+// either explicitly Checkable or a member of a radio group (RadioGroup
+// implies checkable).
+func (d *MenuDropdown) isCheckable(i int) bool {
+	return (i < len(d.Checkable) && d.Checkable[i]) || d.radioGroup(i) != 0
+}
+
+// radioGroup returns Body row i's RadioGroup value, or 0 (no group) if the
+// slice is short.
+func (d *MenuDropdown) radioGroup(i int) int {
+	if i < len(d.RadioGroup) {
+		return d.RadioGroup[i]
+	}
+	return 0
+}
+
+// isChecked returns Body row i's Checked value, or false if the slice is
+// short.
+func (d *MenuDropdown) isChecked(i int) bool {
+	return i < len(d.Checked) && d.Checked[i]
+}
+
+// setChecked grows d.Checked as needed and sets row i's Checked value.
+func (d *MenuDropdown) setChecked(i int, v bool) {
+	for len(d.Checked) <= i {
+		d.Checked = append(d.Checked, false)
+	}
+	d.Checked[i] = v
+}
+
+// selectRadio sets Body row idx's Checked to true and clears Checked on
+// every other row sharing idx's RadioGroup.
+func (d *MenuDropdown) selectRadio(idx int) {
+	group := d.radioGroup(idx)
+	for i := range d.Body {
+		if d.radioGroup(i) == group {
+			d.setChecked(i, i == idx)
+		}
+	}
+}
+
+// hasCheckGutter reports whether any Body row wants a check/bullet glyph,
+// i.e. whether Draw/size must reserve the 2-cell gutter before the label.
+func (d *MenuDropdown) hasCheckGutter() bool {
+	for i := range d.Body {
+		if d.isCheckable(i) {
+			return true
+		}
+	}
+	return false
+}
+
 // size returns the natural (width, height) in cells: the widest of Title / Body
-// plus padding, and a row per Body line (minimum height 3).
+// plus padding (and the check gutter, when any Body row is checkable), and a
+// row per Body line (minimum height 3).
 func (d *MenuDropdown) size() (int, int) {
 	w := utf8.RuneCountInString(d.Title)
 	for _, line := range d.Body {
 		if l := utf8.RuneCountInString(line); l > w {
 			w = l
 		}
+	}
+	if d.hasCheckGutter() {
+		w += 2 // "✓ " / "• " gutter reserved before each Body row's label
 	}
 	w += 4 // 1-cell border + 1-cell text pad on each side
 	h := 2 + len(d.Body)
@@ -75,17 +148,38 @@ func (d *MenuDropdown) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	if d.Title != "" {
 		toolkit.DrawText(pnt, r.X+2, r.Y, d.Title, theme.OnSurface)
 	}
+	gutter := 0
+	if d.hasCheckGutter() {
+		gutter = 2
+	}
 	for i, line := range d.Body {
-		toolkit.DrawText(pnt, r.X+2, r.Y+1+i, line, theme.OnSurface)
+		y := r.Y + 1 + i
+		if d.isCheckable(i) && d.isChecked(i) {
+			glyph := "✓"
+			if d.radioGroup(i) != 0 {
+				glyph = "•"
+			}
+			toolkit.DrawText(pnt, r.X+2, y, glyph, theme.OnSurface)
+		}
+		toolkit.DrawText(pnt, r.X+2+gutter, y, line, theme.OnSurface)
 	}
 }
 
-// OnEvent runs the clicked Body row's action (if any) and dismisses the menu.
+// OnEvent runs the clicked Body row's checkable/radio toggle (if any) and
+// action (if any), and dismisses the menu.
 func (d *MenuDropdown) OnEvent(ev toolkit.Event) {
 	if ev.Kind != toolkit.EventClick {
 		return
 	}
 	idx := ev.Y - 1 // Body rows start at local Y=1 (Title on 0)
+	if idx >= 0 && idx < len(d.Body) {
+		switch {
+		case d.radioGroup(idx) != 0:
+			d.selectRadio(idx)
+		case idx < len(d.Checkable) && d.Checkable[idx]:
+			d.setChecked(idx, !d.isChecked(idx))
+		}
+	}
 	if idx >= 0 && idx < len(d.ItemActions) && d.ItemActions[idx] != nil {
 		d.ItemActions[idx]()
 	}

@@ -5,6 +5,7 @@
 package tui
 
 import (
+	"sort"
 	"unicode/utf8"
 
 	"github.com/go-widgets/painter"
@@ -30,6 +31,13 @@ type TableColumn struct {
 // navigate and a click selects a body row; the viewport scrolls to keep the
 // selection visible.
 //
+// Multi-selection: setting MultiSelect enables Ctrl/Shift-modified clicks
+// that build a set of selected rows (see IsSelected / SelectedIndices /
+// SetSelection / ClearSelection / ToggleSelect / SelectRange) -- mirrors
+// toolkit.ListBox's MultiSelect. Selected remains the anchor/cursor row.
+// When MultiSelect is false (the default) Ctrl/Shift are ignored and only
+// Selected is ever highlighted, exactly as before this feature existed.
+//
 // A toolkit.Widget rendering through painter.Painter (cell grid / RGBA buffer).
 type Table struct {
 	toolkit.Base
@@ -37,8 +45,13 @@ type Table struct {
 	Rows     [][]string
 	Selected int // -1 = no selection
 	OnSelect func(row int)
+	// MultiSelect enables Ctrl/Shift multi-row selection (see the type doc).
+	MultiSelect bool
 
 	scrollY int
+
+	// selected holds the multi-selection set; see ListBox.selected.
+	selected map[int]bool
 }
 
 // tableEmptyPlaceholder is the label rendered under the header when Rows is
@@ -197,8 +210,12 @@ func (t *Table) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 				break
 			}
 			ink := theme.OnSurface
+			hi := i == t.Selected
+			if t.MultiSelect {
+				hi = t.IsSelected(i)
+			}
 			switch {
-			case i == t.Selected:
+			case hi:
 				pnt.FillRect(painter.Rect{X: r.X, Y: y, W: r.W, H: 1}, theme.Accent)
 				ink = theme.Background
 			case i%2 == 1:
@@ -247,8 +264,97 @@ func (t *Table) OnEvent(ev toolkit.Event) {
 			return // header row
 		}
 		i := ev.Y - 1 + t.scrollY
-		if i >= 0 && i < len(t.Rows) {
+		if i < 0 || i >= len(t.Rows) {
+			return
+		}
+		if !t.MultiSelect {
 			t.setSelected(i)
+			return
+		}
+		// MultiSelect: mirrors ListBox's / toolkit.ListBox's onClick.
+		switch {
+		case ev.Shift:
+			t.SelectRange(t.Selected, i)
+		case ev.Ctrl:
+			t.ToggleSelect(i)
+			t.Selected = i
+		default:
+			t.SetSelection(i)
+			t.Selected = i
+		}
+		if t.OnSelect != nil {
+			t.OnSelect(i)
 		}
 	}
+}
+
+// IsSelected reports whether row i is a member of the multi-selection set.
+// Independent of MultiSelect + Selected, so it can be queried (and
+// pre-seeded via SetSelection/ToggleSelect/SelectRange) even before
+// multi-selection is switched on.
+func (t *Table) IsSelected(i int) bool { return t.selected[i] }
+
+// SelectedIndices returns the selected rows in ascending order. The
+// returned slice is a fresh copy the caller may mutate freely.
+func (t *Table) SelectedIndices() []int {
+	out := make([]int, 0, len(t.selected))
+	for i := range t.selected {
+		out = append(out, i)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// SetSelection replaces the selection set with exactly the given indices.
+// Indices outside [0, len(Rows)) are silently dropped.
+func (t *Table) SetSelection(indices ...int) {
+	set := make(map[int]bool, len(indices))
+	for _, i := range indices {
+		if i < 0 || i >= len(t.Rows) {
+			continue
+		}
+		set[i] = true
+	}
+	t.selected = set
+}
+
+// ClearSelection empties the selection set. Selected (the anchor/cursor
+// row) is left untouched.
+func (t *Table) ClearSelection() { t.selected = nil }
+
+// ToggleSelect flips row i's membership in the selection set. Out-of-range
+// indices are a no-op.
+func (t *Table) ToggleSelect(i int) {
+	if i < 0 || i >= len(t.Rows) {
+		return
+	}
+	if t.selected == nil {
+		t.selected = make(map[int]bool)
+	}
+	if t.selected[i] {
+		delete(t.selected, i)
+	} else {
+		t.selected[i] = true
+	}
+}
+
+// SelectRange selects the inclusive range of rows between a and b (either
+// order accepted), replacing the current selection set. The range is
+// clamped to [0, len(Rows)); if the table is empty, or the clamped range is
+// inverted, the resulting selection is empty.
+func (t *Table) SelectRange(a, b int) {
+	if a > b {
+		a, b = b, a
+	}
+	if a < 0 {
+		a = 0
+	}
+	if b >= len(t.Rows) {
+		b = len(t.Rows) - 1
+	}
+	set := make(map[int]bool)
+	for i := a; i <= b; i++ {
+		set[i] = true
+	}
+	t.selected = set
 }
