@@ -42,11 +42,14 @@ type TextEditor struct {
 	lastQuery  string // remembered by Find for FindNext
 
 	// Selection: anchored at (anchorLine, anchorCol), with the caret as the
-	// moving end; active only while selActive. clip is the widget-local
-	// clipboard for Copy/Cut/Paste.
+	// moving end; active only while selActive. Copy/Cut/Paste route through
+	// toolkit's process-wide Clipboard (toolkit.ClipboardText /
+	// SetClipboardText) rather than a widget-local buffer, so text copied
+	// here can be pasted into any other clipboard-aware widget and a host
+	// that installs its own toolkit.Clipboard (OS pasteboard, OSC-52, ...)
+	// is honoured transparently.
 	anchorLine, anchorCol int
 	selActive             bool
-	clip                  string
 
 	scrollY int // first visible line; the viewport follows the caret
 }
@@ -98,10 +101,16 @@ func (t *TextEditor) SelectedText() string {
 	return b.String()
 }
 
-// Copy stores the selection in the widget clipboard and returns it.
+// Copy returns the selected text and, when non-empty, writes it to
+// toolkit's global Clipboard. An empty selection is a no-op on the
+// clipboard -- mirrors a Ctrl+C-with-nothing-selected not clobbering
+// whatever was copied before (see toolkit.TextView.CopySelection).
 func (t *TextEditor) Copy() string {
-	t.clip = t.SelectedText()
-	return t.clip
+	s := t.SelectedText()
+	if s != "" {
+		toolkit.SetClipboardText(s)
+	}
+	return s
 }
 
 // deleteRange removes [sl,sc)-(el,ec], leaving the caret at the start and no
@@ -161,17 +170,19 @@ func (t *TextEditor) insertText(s string) {
 	t.CursorCol = len(last)
 }
 
-// Paste inserts the clipboard at the caret, replacing an active selection. A
-// single undo step. No-op when ReadOnly or the clipboard is empty.
+// Paste inserts toolkit's global Clipboard contents at the caret, replacing
+// an active selection. A single undo step. No-op when ReadOnly or the
+// clipboard is empty.
 func (t *TextEditor) Paste() {
-	if t.ReadOnly || t.clip == "" {
+	s := toolkit.ClipboardText()
+	if t.ReadOnly || s == "" {
 		return
 	}
 	t.pushUndo()
 	if sl, sc, el, ec, ok := t.selRange(); ok {
 		t.deleteRange(sl, sc, el, ec)
 	}
-	t.insertText(t.clip)
+	t.insertText(s)
 	t.rehighlight()
 }
 
