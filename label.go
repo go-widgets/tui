@@ -11,13 +11,16 @@ import (
 	"github.com/go-widgets/toolkit"
 )
 
-// Align is a Label's horizontal text alignment within its bounds.
-type Align int
+// Align is a Label's horizontal text alignment within its bounds. It is a type
+// ALIAS of toolkit.Align so the pixel and cell backends share one vocabulary;
+// the tui.AlignLeft / AlignCenter / AlignRight names remain valid and equal the
+// toolkit constants.
+type Align = toolkit.Align
 
 const (
-	AlignLeft Align = iota
-	AlignCenter
-	AlignRight
+	AlignLeft   = toolkit.AlignLeft
+	AlignCenter = toolkit.AlignCenter
+	AlignRight  = toolkit.AlignRight
 )
 
 // Label is a cell-native static text widget: one line of Text, horizontally
