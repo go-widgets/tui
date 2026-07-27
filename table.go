@@ -17,6 +17,11 @@ import (
 type TableColumn struct {
 	Title string
 	Width int // cells; 0 = auto (equal share of the remainder)
+	// Align controls horizontal placement of BOTH the header Title and every
+	// body cell in this column. The zero value (AlignLeft) keeps the
+	// original left-justified behaviour. Reuses toolkit.Align (aliased as
+	// Align in label.go) so the pixel and cell Tables share one vocabulary.
+	Align Align
 }
 
 // Table is a cell-native data grid: a header row on top, then one body row per
@@ -107,6 +112,28 @@ func (t *Table) setSelected(row int) {
 	}
 }
 
+// cellTextX returns the column where a cell's text starts within [cellX,
+// cellX+cellW), honoring align: AlignLeft (the default) pads 1 cell from the
+// left; AlignRight pads 1 cell from the right; AlignCenter centers the text.
+// All three clamp to the left pad when the text is too wide to fit, so long
+// content never draws left of the cell.
+func cellTextX(cellX, cellW int, text string, align Align) int {
+	n := utf8.RuneCountInString(text)
+	var x int
+	switch align {
+	case AlignRight:
+		x = cellX + cellW - 1 - n
+	case AlignCenter:
+		x = cellX + (cellW-n)/2
+	default: // AlignLeft
+		x = cellX + 1
+	}
+	if x < cellX+1 {
+		x = cellX + 1
+	}
+	return x
+}
+
 // bodyH is the number of body rows visible below the 1-row header.
 func (t *Table) bodyH() int {
 	if h := t.Bounds().H - 1; h > 0 {
@@ -148,7 +175,7 @@ func (t *Table) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	// Header titles.
 	hx := r.X
 	for i, col := range t.Columns {
-		toolkit.DrawText(pnt, hx+1, r.Y, col.Title, theme.OnSurface)
+		toolkit.DrawText(pnt, cellTextX(hx, widths[i], col.Title, col.Align), r.Y, col.Title, theme.OnSurface)
 		hx += widths[i]
 	}
 
@@ -172,9 +199,9 @@ func (t *Table) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 				pnt.FillRect(painter.Rect{X: r.X, Y: y, W: r.W, H: 1}, theme.Surface)
 			}
 			cx := r.X
-			for j := range t.Columns {
+			for j, col := range t.Columns {
 				if j < len(t.Rows[i]) {
-					toolkit.DrawText(pnt, cx+1, y, t.Rows[i][j], ink)
+					toolkit.DrawText(pnt, cellTextX(cx, widths[j], t.Rows[i][j], col.Align), y, t.Rows[i][j], ink)
 				}
 				cx += widths[j]
 			}

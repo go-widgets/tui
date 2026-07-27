@@ -6,8 +6,12 @@ require github.com/go-widgets/painter v0.1.3
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/go-widgets/toolkit v0.26.0
+	github.com/go-widgets/toolkit v0.33.0
 	golang.org/x/term v0.44.0
 )
 
-require golang.org/x/sys v0.46.0 // indirect
+require (
+	golang.org/x/image v0.44.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
+)

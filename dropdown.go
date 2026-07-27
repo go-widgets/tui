@@ -23,6 +23,11 @@ type Dropdown struct {
 	Options  []string
 	Selected int
 	Open     bool
+	// OpenUp makes the option list appear ABOVE the control row instead of
+	// below it — set it when the dropdown sits near the bottom edge so the
+	// list has room. Mirrors toolkit.DropDown.OpenUp; the zero value (false)
+	// keeps the original below-the-control layout.
+	OpenUp   bool
 	OnChange func(idx int, value string)
 
 	active int // highlighted option while Open
@@ -66,22 +71,43 @@ func (d *Dropdown) selectActive() {
 	d.Open = false
 }
 
-// Draw paints the control row and, when Open, the option list below it.
+// controlY and dir return, respectively, the row the control occupies and the
+// direction (+1 down, -1 up) the option list extends from it: below the
+// control at the top of Bounds by default, or above the control at the
+// bottom of Bounds when OpenUp is set.
+func (d *Dropdown) controlY() int {
+	r := d.Bounds()
+	if d.OpenUp {
+		return r.Y + r.H - 1
+	}
+	return r.Y
+}
+
+func (d *Dropdown) dir() int {
+	if d.OpenUp {
+		return -1
+	}
+	return 1
+}
+
+// Draw paints the control row and, when Open, the option list extending from
+// it (below by default, above when OpenUp is set).
 func (d *Dropdown) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	r := d.Bounds()
-	pnt.FillRect(painter.Rect{X: r.X, Y: r.Y, W: r.W, H: 1}, theme.Surface)
-	toolkit.DrawText(pnt, r.X+1, r.Y, d.value(), theme.OnSurface)
+	cy, dir := d.controlY(), d.dir()
+	pnt.FillRect(painter.Rect{X: r.X, Y: cy, W: r.W, H: 1}, theme.Surface)
+	toolkit.DrawText(pnt, r.X+1, cy, d.value(), theme.OnSurface)
 	ind := "▼"
 	if d.Open {
 		ind = "▲"
 	}
-	toolkit.DrawText(pnt, r.X+r.W-2, r.Y, ind, theme.Border)
+	toolkit.DrawText(pnt, r.X+r.W-2, cy, ind, theme.Border)
 	if !d.Open {
 		return
 	}
 	for i, opt := range d.Options {
-		y := r.Y + 1 + i
-		if y >= r.Y+r.H {
+		y := cy + dir*(1+i)
+		if y < r.Y || y >= r.Y+r.H {
 			break
 		}
 		ink := theme.OnSurface
@@ -95,13 +121,25 @@ func (d *Dropdown) Draw(pnt painter.Painter, theme *toolkit.Theme) {
 	}
 }
 
+// controlLocalY is the control row's Y offset local to Bounds: 0 at the top
+// by default, or the bottom row (H-1) when OpenUp is set.
+func (d *Dropdown) controlLocalY() int {
+	if d.OpenUp {
+		return d.Bounds().H - 1
+	}
+	return 0
+}
+
 // OnEvent toggles/navigates the list. Collapsed: Enter/Down/click opens. Open:
-// Up/Down move the highlight, Enter/click selects, Escape closes.
+// Up/Down move the highlight, Enter/click selects, Escape closes. Click
+// coordinates are local to Bounds; the control row and option offsets follow
+// controlLocalY/dir so hit-testing matches the OpenUp layout Draw produces.
 func (d *Dropdown) OnEvent(ev toolkit.Event) {
+	cly := d.controlLocalY()
 	if !d.Open {
 		switch ev.Kind {
 		case toolkit.EventClick:
-			if ev.Y == 0 {
+			if ev.Y == cly {
 				d.open()
 			}
 		case toolkit.EventKeyDown:
@@ -128,11 +166,11 @@ func (d *Dropdown) OnEvent(ev toolkit.Event) {
 			d.Open = false
 		}
 	case toolkit.EventClick:
-		if ev.Y == 0 {
+		if ev.Y == cly {
 			d.Open = false
 			return
 		}
-		if i := ev.Y - 1; i >= 0 && i < len(d.Options) {
+		if i := d.dir()*(ev.Y-cly) - 1; i >= 0 && i < len(d.Options) {
 			d.active = i
 			d.selectActive()
 		}
