@@ -97,6 +97,29 @@ func TestVBoxRouting(t *testing.T) {
 	}
 }
 
+func TestVBoxOverlayRoutingTranslatesAtNonZeroBounds(t *testing.T) {
+	// Regression: with the VBox off-origin, an overlay click must still hit-test
+	// and translate into the overlay's local frame — including the follow-on drag.
+	o := &spyWidget{}
+	v := &VBox{HeaderH: 1, FooterH: 1, Overlays: []toolkit.Widget{o}}
+	v.SetBounds(toolkit.Rect{X: 30, Y: 5, W: 20, H: 20}) // overlay abs bounds {34,8,12,14}
+
+	// VBox-local click at (5,5) == absolute (35,10), inside the overlay.
+	v.OnEvent(vclick(5, 5))
+	if o.count != 1 || o.last.X != 1 || o.last.Y != 2 {
+		t.Fatalf("off-origin overlay click: count=%d last=%+v, want count 1 local {1,2}", o.count, o.last)
+	}
+	// Follow-on drag stays captured and translated (dragDx/Dy = ob − r).
+	v.OnEvent(vdrag(6, 6))
+	if o.count != 2 || o.last.X != 2 || o.last.Y != 3 {
+		t.Fatalf("off-origin overlay drag: count=%d last=%+v, want count 2 local {2,3}", o.count, o.last)
+	}
+	v.OnEvent(vup(6, 6))
+	if v.dragTarget != nil {
+		t.Fatal("MouseUp did not release capture")
+	}
+}
+
 func TestVBoxOverlayPriorityAndNilChildren(t *testing.T) {
 	// Two overlays share the inset bounds; the later one (top) claims first.
 	lo, hi := &spyWidget{}, &spyWidget{}

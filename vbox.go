@@ -90,18 +90,23 @@ func (p *VBox) OnEvent(ev toolkit.Event) {
 	}
 	if ev.Kind == toolkit.EventClick {
 		r := p.Bounds()
-		// Overlays paint last, so hit-test them first (reverse order).
+		// Overlays paint last, so hit-test them first (reverse order). ev is
+		// VBox-local; HitTest wants absolute coords, so reconstruct them from the
+		// VBox origin, then translate the click into the overlay's local frame.
+		// dragDx/Dy store the local→child offset (ob − r) so the drag path stays
+		// consistent. The old code hit-tested local-vs-absolute and subtracted
+		// the absolute origin, so overlays only worked with the VBox at (0,0).
 		for i := len(p.Overlays) - 1; i >= 0; i-- {
 			o := p.Overlays[i]
-			if !o.HitTest(ev.X, ev.Y) {
+			ob := o.Bounds()
+			if !o.HitTest(ev.X+r.X, ev.Y+r.Y) {
 				continue
 			}
-			ob := o.Bounds()
 			child := ev
-			child.X -= ob.X
-			child.Y -= ob.Y
+			child.X = ev.X + r.X - ob.X
+			child.Y = ev.Y + r.Y - ob.Y
 			o.OnEvent(child)
-			p.dragTarget, p.dragDx, p.dragDy = o, ob.X, ob.Y
+			p.dragTarget, p.dragDx, p.dragDy = o, ob.X-r.X, ob.Y-r.Y
 			return
 		}
 		switch {
