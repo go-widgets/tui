@@ -103,6 +103,84 @@ func TestTableSelectAndNav(t *testing.T) {
 	NewTable([]TableColumn{{Title: "X"}}, [][]string{{"a"}, {"b"}}).OnEvent(vkey("Down"))
 }
 
+// TestCellTextX exercises every Align branch of cellTextX directly, including
+// the "text too wide for the cell" clamp shared by AlignRight/AlignCenter.
+func TestCellTextX(t *testing.T) {
+	if x := cellTextX(100, 20, "hi", AlignLeft); x != 101 {
+		t.Errorf("AlignLeft = %d, want 101", x)
+	}
+	if x := cellTextX(100, 20, "hi", AlignRight); x != 117 { // 100+20-1-2
+		t.Errorf("AlignRight = %d, want 117", x)
+	}
+	if x := cellTextX(100, 20, "hi", AlignCenter); x != 109 { // 100+(20-2)/2
+		t.Errorf("AlignCenter = %d, want 109", x)
+	}
+	// Text wider than the cell clamps to the left pad (cellX+1) for both
+	// AlignRight and AlignCenter.
+	if x := cellTextX(100, 1, "wide text", AlignRight); x != 101 {
+		t.Errorf("AlignRight clamp = %d, want 101", x)
+	}
+	if x := cellTextX(100, 1, "wide text", AlignCenter); x != 101 {
+		t.Errorf("AlignCenter clamp = %d, want 101", x)
+	}
+}
+
+// TestTableColumnAlign draws a 3-column table (left/right/center) at
+// non-zero bounds and asserts, at cell precision, that both the header
+// titles and the body cells honor each column's Align.
+func TestTableColumnAlign(t *testing.T) {
+	theme := toolkit.DefaultLight()
+	cols := []TableColumn{
+		{Title: "Name", Width: 8, Align: AlignLeft},
+		{Title: "Qty", Width: 6, Align: AlignRight},
+		{Title: "OK", Width: 5, Align: AlignCenter},
+	}
+	rows := [][]string{{"Alice", "42", "OK"}}
+	tb := NewTable(cols, rows)
+	// NewTable defaults Selected to -1 (no row highlighted); Draw must be
+	// called with a valid (>= 0) Selected, matching every other Table Draw
+	// test in this file — Selected=-1 with non-empty Rows hits a pre-existing
+	// scrollToSel bug unrelated to Align (out of scope for this change).
+	tb.Selected = 0
+	tb.SetBounds(toolkit.Rect{X: 1, Y: 2, W: 19, H: 3})
+
+	cp := painter.NewCellPainter(21, 6)
+	tb.Draw(cp, theme)
+	at := func(x, y int) painter.Cell { return cp.Cells[y*cp.W+x] }
+
+	// Header row (Y=2): col0 [1,9) left-pads to 2; col1 [9,15) right-aligns
+	// "Qty" (n=3) to 9+6-1-3=11; col2 [15,20) centers "OK" (n=2) to
+	// 15+(5-2)/2=16.
+	if got := at(2, 2).Rune; got != 'N' {
+		t.Errorf("header col0 (left) start = %q, want 'N'", got)
+	}
+	if got := at(11, 2).Rune; got != 'Q' {
+		t.Errorf("header col1 (right) start = %q, want 'Q'", got)
+	}
+	if got := at(16, 2).Rune; got != 'O' {
+		t.Errorf("header col2 (center) start = %q, want 'O'", got)
+	}
+
+	// Body row (Y=3): same per-column alignment applies to cell text. "42"
+	// (n=2) right-aligns to 9+6-1-2=12; "OK" (n=2) centers to 16 (same as
+	// the header, same width/text length).
+	if got := at(2, 3).Rune; got != 'A' {
+		t.Errorf("body col0 (left) start = %q, want 'A'", got)
+	}
+	if got := at(12, 3).Rune; got != '4' {
+		t.Errorf("body col1 (right) start = %q, want '4'", got)
+	}
+	if got := at(16, 3).Rune; got != 'O' {
+		t.Errorf("body col2 (center) start = %q, want 'O'", got)
+	}
+
+	// Row 0 is Selected → Accent-highlighted; the per-column alignment still
+	// applies alongside that ink branch.
+	if got := at(2, 3).Bg; got != theme.Accent {
+		t.Errorf("selected row bg = %+v, want theme.Accent %+v", got, theme.Accent)
+	}
+}
+
 func TestTableDraw(t *testing.T) {
 	mk := func(w, h int) *painter.PixelPainter { return painter.NewPixelPainter(make([]byte, w*h*4), w, h) }
 	theme := toolkit.DefaultLight()
