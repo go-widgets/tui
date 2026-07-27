@@ -73,27 +73,40 @@ type App struct {
 	consumed bool
 
 	// seams — swapped by tests to bypass every OS-touching call.
-	openTTYFn func(*os.File) (TTY, error)
-	stdinFn   func() io.Reader
-	stdoutFn  func() *os.File
-	signalFn  func() (resize <-chan struct{}, interrupt <-chan struct{}, stop func())
-	tickFn    func(time.Duration) (<-chan time.Time, func())
+	openTTYFn  func(*os.File) (TTY, error)
+	stdinFn    func() io.Reader
+	stdoutFn   func() *os.File
+	signalFn   func() (resize <-chan struct{}, interrupt <-chan struct{}, stop func())
+	tickFn     func(time.Duration) (<-chan time.Time, func())
+	escDelayFn func(time.Duration) (<-chan time.Time, func())
 }
+
+// escDelay is how long the loop waits after a lone ESC before delivering it as
+// an Escape keypress (rather than the start of a CSI sequence). Matches the de
+// facto terminal ESCDELAY.
+const escDelay = 40 * time.Millisecond
 
 // NewApp returns an App wired to the real terminal: OpenTTY, os.Stdin,
 // os.Stdout, real Unix signal handling, and time.NewTicker for the
 // tick channel. Tests build an App by hand and swap the seams instead.
 func NewApp() *App {
 	return &App{
-		Keys:      map[string]func(*App){},
-		Theme:     toolkit.DefaultLight(),
-		quit:      make(chan struct{}),
-		openTTYFn: OpenTTY,
-		stdinFn:   func() io.Reader { return os.Stdin },
-		stdoutFn:  func() *os.File { return os.Stdout },
-		signalFn:  realSignalFn,
-		tickFn:    realTickFn,
+		Keys:       map[string]func(*App){},
+		Theme:      toolkit.DefaultLight(),
+		quit:       make(chan struct{}),
+		openTTYFn:  OpenTTY,
+		stdinFn:    func() io.Reader { return os.Stdin },
+		stdoutFn:   func() *os.File { return os.Stdout },
+		signalFn:   realSignalFn,
+		tickFn:     realTickFn,
+		escDelayFn: realEscDelayFn,
 	}
+}
+
+// realEscDelayFn is a one-shot timer used as the idle deadline for a lone ESC.
+func realEscDelayFn(d time.Duration) (<-chan time.Time, func()) {
+	t := time.NewTimer(d)
+	return t.C, func() { t.Stop() }
 }
 
 // realSignalFn wires SIGWINCH → resize and os.Interrupt → interrupt,
@@ -276,23 +289,35 @@ func (a *App) Run() (exitCode int) {
 	a.refreshSize()
 	a.draw()
 
+	// escCh / stopEsc arm an idle deadline whenever a lone ESC is left pending,
+	// so a bare Escape keypress is delivered after escDelay instead of stalling
+	// until the next key. armEsc re-evaluates after every Feed.
+	var escCh <-chan time.Time
+	stopEsc := func() {}
+	defer func() { stopEsc() }()
+	armEsc := func() {
+		stopEsc()
+		if a.parser.PendingEscape() {
+			escCh, stopEsc = a.escDelayFn(escDelay)
+		} else {
+			escCh, stopEsc = nil, func() {}
+		}
+	}
+
 loop:
 	for {
 		select {
 		case b := <-inCh:
 			for _, ev := range a.parser.Feed(b) {
-				a.consumed = false
-				if h, ok := a.Keys[ev.Code]; ok {
-					h(a)
-				}
-				if !a.consumed {
-					// Modal capture wins over Root when set.
-					if a.InputTarget != nil {
-						a.InputTarget.OnEvent(ev)
-					} else if a.Root != nil {
-						a.Root.OnEvent(ev)
-					}
-				}
+				a.dispatch(ev)
+			}
+			armEsc()
+			a.dirty = true
+		case <-escCh:
+			stopEsc()
+			escCh, stopEsc = nil, func() {}
+			for _, ev := range a.parser.Flush() {
+				a.dispatch(ev)
 			}
 			a.dirty = true
 		case <-resizeCh:
@@ -316,6 +341,23 @@ loop:
 		}
 	}
 	return a.exitCode
+}
+
+// dispatch delivers one input event: a matching Keys handler runs first, and
+// unless it consumed the event, the event flows to the modal InputTarget (when
+// set) or otherwise to Root.
+func (a *App) dispatch(ev toolkit.Event) {
+	a.consumed = false
+	if h, ok := a.Keys[ev.Code]; ok {
+		h(a)
+	}
+	if !a.consumed {
+		if a.InputTarget != nil {
+			a.InputTarget.OnEvent(ev)
+		} else if a.Root != nil {
+			a.Root.OnEvent(ev)
+		}
+	}
 }
 
 // refreshSize re-queries the TTY dimensions after resize (and on

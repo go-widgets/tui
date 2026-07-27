@@ -139,6 +139,8 @@ type harness struct {
 	stopSig     chan struct{}
 	tickCh      chan time.Time
 	stopTick    chan struct{}
+	escCh       chan time.Time
+	stopEsc     chan struct{}
 }
 
 // newHarness returns a fully-mocked App ready for Run(). Every seam
@@ -169,6 +171,8 @@ func newHarness(t *testing.T) *harness {
 		stopSig:     make(chan struct{}, 1),
 		tickCh:      make(chan time.Time, 4),
 		stopTick:    make(chan struct{}, 1),
+		escCh:       make(chan time.Time, 1),
+		stopEsc:     make(chan struct{}, 4),
 	}
 	a := &App{
 		Keys: map[string]func(*App){},
@@ -181,6 +185,14 @@ func newHarness(t *testing.T) *harness {
 	}
 	a.tickFn = func(d time.Duration) (<-chan time.Time, func()) {
 		return h.tickCh, func() { h.stopTick <- struct{}{} }
+	}
+	a.escDelayFn = func(d time.Duration) (<-chan time.Time, func()) {
+		return h.escCh, func() {
+			select {
+			case h.stopEsc <- struct{}{}:
+			default:
+			}
+		}
 	}
 	h.app = a
 	return h
@@ -229,7 +241,7 @@ func TestNewAppDefaults(t *testing.T) {
 		t.Error("NewApp Theme is nil")
 	}
 	if a.openTTYFn == nil || a.stdinFn == nil || a.stdoutFn == nil ||
-		a.signalFn == nil || a.tickFn == nil {
+		a.signalFn == nil || a.tickFn == nil || a.escDelayFn == nil {
 		t.Error("NewApp did not wire seams")
 	}
 	// Sanity: the stdin/stdout seams point at the real streams.
@@ -738,6 +750,46 @@ func TestRealTickFnTicks(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("realTickFn did not tick")
 	}
+}
+
+func TestRealEscDelayFnFires(t *testing.T) {
+	ch, stop := realEscDelayFn(5 * time.Millisecond)
+	defer stop()
+	select {
+	case <-ch:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("realEscDelayFn did not fire")
+	}
+}
+
+// TestAppLoneEscapeFlushesAfterIdle proves the fix: a lone ESC byte is held
+// pending (Feed emits nothing), and when the idle timer fires the loop flushes
+// it as an Escape keypress — instead of stalling until the next key.
+func TestAppLoneEscapeFlushesAfterIdle(t *testing.T) {
+	h := newHarness(t)
+	escFired := make(chan struct{}, 1)
+	h.app.Keys["Escape"] = func(a *App) {
+		select {
+		case escFired <- struct{}{}:
+		default:
+		}
+		a.Quit()
+	}
+	wait := h.runAsync(t)
+	// A lone ESC: the parser buffers it, no event yet.
+	if _, err := h.stdinW.Write([]byte{0x1B}); err != nil {
+		t.Fatalf("write ESC: %v", err)
+	}
+	// Fire the idle deadline; the loop flushes the pending ESC to the handler.
+	// The buffered escCh is only consumed once the loop has armed it (after the
+	// ESC is Fed), so there is no ordering race.
+	h.escCh <- time.Time{}
+	select {
+	case <-escFired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("lone ESC was not flushed to the Escape handler")
+	}
+	_ = wait()
 }
 
 // TestRunStdinGoroutineQuitBranchExits stresses the stdin reader
