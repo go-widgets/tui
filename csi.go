@@ -161,6 +161,15 @@ func (p *InputParser) Flush() []toolkit.Event {
 	return events
 }
 
+// PendingEscape reports whether the buffer holds exactly a lone ESC — the
+// ambiguous "was this Escape, or the start of a CSI sequence?" state. The event
+// loop arms an idle timer on this so a lone Escape keypress is delivered after a
+// short delay instead of waiting for the next key (a partial CSI, len > 1, is
+// NOT a pending Escape — it will complete when its remaining bytes arrive).
+func (p *InputParser) PendingEscape() bool {
+	return len(p.pending) == 1 && p.pending[0] == 0x1B
+}
+
 // decodeCSIN maps the parameter bytes and final byte of a CSI
 // sequence (the portion after "ESC [") to zero or more [toolkit.Event]
 // values. The second return is false for any unmapped sequence,
