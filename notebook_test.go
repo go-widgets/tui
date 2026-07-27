@@ -11,6 +11,47 @@ import (
 	"github.com/go-widgets/toolkit"
 )
 
+func TestNotebookTabSides(t *testing.T) {
+	// Tab select + body routing (translated) + per-side Draw geometry for each
+	// non-default side. Bounds 20×10, two 2-char tabs (strip col width 4).
+	cases := []struct {
+		name      string
+		side      toolkit.TabSide
+		selectAt  [2]int // local click on tab index 1
+		bodyAt    [2]int // local click in the body
+		bodyLocal [2]int // expected page-local coords of the body click
+	}{
+		{"bottom", toolkit.TabBottom, [2]int{5, 9}, [2]int{3, 3}, [2]int{3, 3}},
+		{"left", toolkit.TabLeft, [2]int{2, 1}, [2]int{10, 3}, [2]int{6, 3}},
+		{"right", toolkit.TabRight, [2]int{17, 1}, [2]int{3, 3}, [2]int{3, 3}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			page := &spyWidget{}
+			n := NewNotebook()
+			n.TabSide = c.side
+			n.AddTab("AA", &spyWidget{})
+			n.AddTab("BB", page)
+			n.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 10})
+
+			n.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: c.selectAt[0], Y: c.selectAt[1]})
+			if n.Active != 1 {
+				t.Fatalf("%s: click tab 1 → Active=%d", c.name, n.Active)
+			}
+			// Draw exercises strip()/tabRect()/bodyRect() for this side.
+			n.Draw(painter.NewCellPainter(20, 10), toolkit.DefaultLight())
+			// A body click routes to the active page, translated to its frame.
+			n.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: c.bodyAt[0], Y: c.bodyAt[1]})
+			if page.count != 1 {
+				t.Fatalf("%s: body click routed %d events, want 1", c.name, page.count)
+			}
+			if page.last.X != c.bodyLocal[0] || page.last.Y != c.bodyLocal[1] {
+				t.Errorf("%s: page got %+v, want local %v", c.name, page.last, c.bodyLocal)
+			}
+		})
+	}
+}
+
 func TestNotebookTabsAndRanges(t *testing.T) {
 	n := NewNotebook()
 	p1, p2 := &spyWidget{}, &spyWidget{}
