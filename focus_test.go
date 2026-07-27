@@ -11,6 +11,21 @@ import (
 	"github.com/go-widgets/toolkit"
 )
 
+func TestFocusRingClickTranslatesToMemberLocalOffOrigin(t *testing.T) {
+	// Regression: a member not at X=0 must receive the click in its OWN local
+	// frame. A SpinButton reads ev.X to tell its left cap (decrement) from its
+	// right cap (increment), so it exposes the bug where the ring forwarded raw
+	// coords: clicking the LEFT cap at its absolute column used to increment.
+	sp := NewSpinButton(0, 100, 50, 5)
+	sp.SetBounds(toolkit.Rect{X: 20, Y: 0, W: 12, H: 1})
+	r := NewFocusRing(sp)
+	// Absolute column 20 == the SpinButton's left cap (local X=0).
+	r.OnEvent(toolkit.Event{Kind: toolkit.EventClick, X: 20, Y: 0})
+	if sp.Value != 45 {
+		t.Fatalf("SpinButton.Value = %d, want 45 (left-cap decrement); the raw-forward bug increments to 55", sp.Value)
+	}
+}
+
 func TestFocusRingTraversal(t *testing.T) {
 	c0, c1, c2 := 0, 0, 0
 	b0 := NewButton("a", func() { c0++ })

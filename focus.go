@@ -114,10 +114,20 @@ func (r *FocusRing) OnEvent(ev toolkit.Event) {
 		}
 	}
 	if ev.Kind == toolkit.EventClick {
+		rb := r.Bounds()
 		for i, it := range r.Items {
-			if it.HitTest(ev.X, ev.Y) {
+			ib := it.Bounds()
+			// HitTest wants absolute coords; reconstruct them from the ring-local
+			// event + the ring's own origin. Then forward the click TRANSLATED
+			// into the member's local frame — the ring used to hand members the
+			// raw coords, so a member not at X=0 (any real form field) read the
+			// wrong column (e.g. a SpinButton's left cap fired as its right).
+			if it.HitTest(ev.X+rb.X, ev.Y+rb.Y) {
 				r.Focus(i)
-				it.OnEvent(ev)
+				local := ev
+				local.X = ev.X + rb.X - ib.X
+				local.Y = ev.Y + rb.Y - ib.Y
+				it.OnEvent(local)
 				return
 			}
 		}
