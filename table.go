@@ -150,8 +150,14 @@ func (t *Table) page() int {
 	return 1
 }
 
-// scrollToSel keeps the selected row inside the visible body rows.
+// scrollToSel keeps the selected row inside the visible body rows. With no
+// selection (Selected < 0, the default) there is nothing to scroll to, so it
+// leaves scrollY untouched — otherwise scrollY would follow Selected to -1 and
+// Draw would index Rows[-1].
 func (t *Table) scrollToSel() {
+	if t.Selected < 0 {
+		return
+	}
 	h := t.bodyH()
 	if h <= 0 {
 		return

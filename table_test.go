@@ -137,10 +137,9 @@ func TestTableColumnAlign(t *testing.T) {
 	}
 	rows := [][]string{{"Alice", "42", "OK"}}
 	tb := NewTable(cols, rows)
-	// NewTable defaults Selected to -1 (no row highlighted); Draw must be
-	// called with a valid (>= 0) Selected, matching every other Table Draw
-	// test in this file — Selected=-1 with non-empty Rows hits a pre-existing
-	// scrollToSel bug unrelated to Align (out of scope for this change).
+	// Select row 0 so this test also covers the Accent-highlight ink branch
+	// alongside the alignment geometry. (The no-selection default is covered
+	// separately by TestTableDrawNoSelectionDoesNotPanic.)
 	tb.Selected = 0
 	tb.SetBounds(toolkit.Rect{X: 1, Y: 2, W: 19, H: 3})
 
@@ -178,6 +177,37 @@ func TestTableColumnAlign(t *testing.T) {
 	// applies alongside that ink branch.
 	if got := at(2, 3).Bg; got != theme.Accent {
 		t.Errorf("selected row bg = %+v, want theme.Accent %+v", got, theme.Accent)
+	}
+}
+
+// A Table built by NewTable (Selected == -1) with non-empty Rows must Draw
+// without panicking: scrollToSel used to follow Selected to -1, and the body
+// loop then indexed Rows[-1]. This is the default configuration of any freshly
+// constructed Table, so it must render the rows top-aligned with no highlight.
+func TestTableDrawNoSelectionDoesNotPanic(t *testing.T) {
+	theme := toolkit.DefaultLight()
+	cols := []TableColumn{{Title: "A", Width: 6}}
+	rows := [][]string{{"r0"}, {"r1"}, {"r2"}}
+	tb := NewTable(cols, rows) // Selected stays -1
+	tb.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 6})
+
+	cp := painter.NewCellPainter(10, 6)
+	tb.Draw(cp, theme) // must not panic
+	at := func(x, y int) painter.Cell { return cp.Cells[y*cp.W+x] }
+
+	// scrollY stayed at 0, so row 0 renders on the first body line (Y=1).
+	if tb.scrollY != 0 {
+		t.Fatalf("scrollY = %d, want 0 (no selection must not move the viewport)", tb.scrollY)
+	}
+	// Left-aligned column pads by 1 cell, so "r0" starts at x=1 on the first
+	// body line.
+	if got := at(1, 1).Rune; got != 'r' {
+		t.Errorf("body row 0 text start = %q, want 'r'", got)
+	}
+	// No row is highlighted: the first body row keeps the plain SurfaceAlt fill
+	// (row 0 is even, so not even the zebra Surface stripe), never Accent.
+	if got := at(0, 1).Bg; got == theme.Accent {
+		t.Errorf("body row 0 bg = %+v, must not be Accent with no selection", got)
 	}
 }
 
