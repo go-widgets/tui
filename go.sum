@@ -10,8 +10,8 @@ github.com/go-opentype/shape v0.3.2 h1:qaaUhg9m6yusm6MCfa07DhZ5Z0ZxOmGwLxHklVeLU
 github.com/go-opentype/shape v0.3.2/go.mod h1:oVq3kFGx6kIHKrFXfxqnp8JUYR7k9NzeY+E17LYHhrU=
 github.com/go-widgets/painter v0.2.0 h1:C7anwlKLYnlTeCK90xKYvy0srxYXqhuvyDFismlf2Sc=
 github.com/go-widgets/painter v0.2.0/go.mod h1:ccmlkH2UmcXQh6rt9Fu2eDt2RI0B5V0POaGmUKeW0EQ=
-github.com/go-widgets/toolkit v0.81.0 h1:HNna1WWMGFjra0JbRirHYDlEfljAog1sJAKvqfKbBnI=
-github.com/go-widgets/toolkit v0.81.0/go.mod h1:uBYcJJeBA2hqHiTlKaLsPZ9t/NsBA6DFtpp33i5l5/8=
+github.com/go-widgets/toolkit v0.82.0 h1:yXAjyvMtOn8KY8STY5sZeeDDKFWz+u3VhKa/tIgDYp8=
+github.com/go-widgets/toolkit v0.82.0/go.mod h1:uBYcJJeBA2hqHiTlKaLsPZ9t/NsBA6DFtpp33i5l5/8=
 golang.org/x/sys v0.46.0 h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=
 golang.org/x/sys v0.46.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
 golang.org/x/term v0.44.0 h1:0rLvDRCtNj0gZkyIXhCyOb2OAzEhLVqc4B+hrsBhrmc=
