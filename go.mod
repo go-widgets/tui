@@ -6,7 +6,7 @@ require github.com/go-widgets/painter v0.2.0
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/go-widgets/toolkit v0.82.0
+	github.com/go-widgets/toolkit v0.98.0
 	golang.org/x/term v0.44.0
 )
 
