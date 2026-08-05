@@ -34,7 +34,7 @@ widgets := []painter.Widget{
 _ = tui.RenderOnce(os.Stdout, widgets, nil) // nil theme = LightTheme
 ```
 
-## Interactive `tui.App` runner (v0.3.x)
+## Interactive `tui.App` runner (since v0.3.0)
 
 For a full interactive experience — raw mode + alt-screen + input
 loop + resize + cleanup — instantiate a `tui.App`:
@@ -144,6 +144,7 @@ occupies one cell — no pixel padding leaking into the layout.
 | `Scale` | draggable slider over `Min..Max`; click / drag / arrow-key stepping |
 | `ProgressBar` | continuous `Fraction` fill with an optional centred label |
 | `LevelBar` | discrete `Value`/`Max` segments (battery / signal / steps) |
+| `Sparkline` | inline mini-chart of a value series (bar / line block glyphs) |
 | `ListBox` | scrollable single-select list with `OnSelect` |
 | `TreeView` | collapsible hierarchy (chevrons, keyboard nav, scroll) for file trees / outlines |
 | `Table` | data grid: header, auto/fixed columns, zebra rows, selection, scroll |
