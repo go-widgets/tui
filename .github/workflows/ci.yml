@@ -57,6 +57,13 @@ jobs:
             exit 1
           fi
 
+      - name: E2E pty tests (cell-level, keymap-demo)
+        # Spawns the real keymap-demo binary under a pseudo-terminal, types
+        # key streams, and asserts on the decoded cell grid (chords, scope
+        # resolution, hot rebind). Gated behind the `integration` build tag so
+        # the fast unit/coverage steps above never spawn a pty.
+        run: go test -tags integration ./cmd/keymap-demo/
+
       - name: Cross-compile smoke (all 6 64-bit arches + wasm + darwin)
         run: |
           for arch in amd64 arm64 riscv64 loong64 ppc64le s390x; do
