@@ -114,7 +114,7 @@ func widgetFactories() []factory {
 		}},
 		{"toast", func() toolkit.Widget {
 			w := toolkit.NewToast("saved", toolkit.ToastSuccess)
-			w.Visible = true
+			w.Visible().Set(true)
 			w.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 30, H: 3})
 			return w
 		}},
@@ -182,8 +182,8 @@ func widgetFactories() []factory {
 		}},
 		{"stat", func() toolkit.Widget {
 			w := toolkit.NewStat("Requests", "12,845")
-			w.Change = "+8%"
-			w.Trend = toolkit.StatUp
+			w.Change().Set("+8%")
+			w.Trend().Set(toolkit.StatUp)
 			w.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 8})
 			return w
 		}},
@@ -216,7 +216,7 @@ func widgetFactories() []factory {
 		}},
 		{"progresscircle", func() toolkit.Widget {
 			w := toolkit.NewProgressCircle()
-			w.Fraction = 0.66
+			w.Fraction().Set(0.66)
 			w.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 8, H: 4})
 			return w
 		}},
