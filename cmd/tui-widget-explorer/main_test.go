@@ -44,8 +44,8 @@ func TestNewStateFields(t *testing.T) {
 	if s.body.Right == nil {
 		t.Fatal("initial stage not set")
 	}
-	if !strings.Contains(s.status.Text, s.entries[0].name) {
-		t.Errorf("status %q missing first widget name", s.status.Text)
+	if !strings.Contains(s.status.Text().Get(), s.entries[0].name) {
+		t.Errorf("status %q missing first widget name", s.status.Text().Get())
 	}
 }
 
@@ -61,8 +61,8 @@ func TestSelectRebuildsStage(t *testing.T) {
 	if s.body.Right == first {
 		t.Error("selecting did not rebuild the stage")
 	}
-	if !strings.Contains(s.status.Text, s.entries[4].name) {
-		t.Errorf("status not synced to selection: %q", s.status.Text)
+	if !strings.Contains(s.status.Text().Get(), s.entries[4].name) {
+		t.Errorf("status not synced to selection: %q", s.status.Text().Get())
 	}
 	if s.stageFocused || s.app.InputTarget != nil {
 		t.Error("rebuilding the stage should return focus to the list")

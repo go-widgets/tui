@@ -74,9 +74,9 @@ type entry struct {
 // state bundles the explorer's mutable widgets.
 type state struct {
 	list         *tui.ListBox
-	body         *tui.HSplit  // Left = list, Right = the live stage widget
+	body         *tui.HSplit // Left = list, Right = the live stage widget
 	status       *toolkit.Label
-	vbox         *tui.VBox    // the real layout
+	vbox         *tui.VBox     // the real layout
 	root         *explorerRoot // wraps vbox + forwards ticks to the stage
 	entries      []entry
 	stageFocused bool
@@ -143,8 +143,8 @@ func (s *state) syncStatus() {
 	if s.stageFocused {
 		focus = "stage"
 	}
-	s.status.Text = fmt.Sprintf(" %s  ·  focus: %s  ·  ↑↓ select · Tab focus · Esc back · q quit",
-		s.entries[s.list.Selected].name, focus)
+	s.status.Text().Set(fmt.Sprintf(" %s  ·  focus: %s  ·  ↑↓ select · Tab focus · Esc back · q quit",
+		s.entries[s.list.Selected].name, focus))
 }
 
 // keys returns the App key bindings.
