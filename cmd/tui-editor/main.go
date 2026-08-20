@@ -299,7 +299,7 @@ func (s *state) refreshStatus() {
 		name += " [+]"
 	}
 	pos := fmt.Sprintf("%d:%d", s.tv.CursorLine+1, s.tv.CursorCol+1)
-	s.statusbar.Text = fmt.Sprintf("%s  |  %s  |  %s", modeName(s.mode), name, pos)
+	s.statusbar.Text().Set(fmt.Sprintf("%s  |  %s  |  %s", modeName(s.mode), name, pos))
 }
 
 // modeName returns the human-readable label for m, used in the

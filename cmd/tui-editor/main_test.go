@@ -90,22 +90,22 @@ func TestSetModeUpdatesStateAndVisibility(t *testing.T) {
 func TestRefreshStatusFormatsSegments(t *testing.T) {
 	s := newState()
 	s.refreshStatus()
-	if !strings.Contains(s.statusbar.Text, "VIEW") {
-		t.Errorf("status text missing VIEW: %q", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "VIEW") {
+		t.Errorf("status text missing VIEW: %q", s.statusbar.Text().Get())
 	}
-	if !strings.Contains(s.statusbar.Text, "*scratch*") {
-		t.Errorf("status text missing *scratch*: %q", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "*scratch*") {
+		t.Errorf("status text missing *scratch*: %q", s.statusbar.Text().Get())
 	}
 
 	s.file = "notes.md"
 	s.dirty = true
 	s.tv.CursorLine, s.tv.CursorCol = 4, 6
 	s.refreshStatus()
-	if !strings.Contains(s.statusbar.Text, "notes.md [+]") {
-		t.Errorf("status text missing notes.md [+]: %q", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "notes.md [+]") {
+		t.Errorf("status text missing notes.md [+]: %q", s.statusbar.Text().Get())
 	}
-	if !strings.Contains(s.statusbar.Text, "5:7") {
-		t.Errorf("status text missing 5:7 (1-indexed cursor): %q", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "5:7") {
+		t.Errorf("status text missing 5:7 (1-indexed cursor): %q", s.statusbar.Text().Get())
 	}
 }
 
@@ -401,8 +401,8 @@ func TestCtrlZUndoesLastCharAndRefreshesStatus(t *testing.T) {
 	if s.tv.CursorCol != 2 {
 		t.Fatalf("setup: CursorCol = %d, want 2", s.tv.CursorCol)
 	}
-	if !strings.Contains(s.statusbar.Text, "1:3") {
-		t.Fatalf("setup status = %q, want to contain 1:3", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "1:3") {
+		t.Fatalf("setup status = %q, want to contain 1:3", s.statusbar.Text().Get())
 	}
 	// The App's event-loop consumption path (Consume prevents
 	// Root.OnEvent from double-firing) is exercised by the
@@ -411,8 +411,8 @@ func TestCtrlZUndoesLastCharAndRefreshesStatus(t *testing.T) {
 	if s.tv.CursorCol != 1 {
 		t.Errorf("Ctrl+Z: CursorCol = %d, want 1", s.tv.CursorCol)
 	}
-	if !strings.Contains(s.statusbar.Text, "1:2") {
-		t.Errorf("Ctrl+Z status = %q, want to contain 1:2", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "1:2") {
+		t.Errorf("Ctrl+Z status = %q, want to contain 1:2", s.statusbar.Text().Get())
 	}
 }
 
@@ -429,8 +429,8 @@ func TestCtrlYRedoesAndRefreshesStatus(t *testing.T) {
 	if s.tv.CursorCol != 1 {
 		t.Errorf("Ctrl+Y: CursorCol = %d, want 1", s.tv.CursorCol)
 	}
-	if !strings.Contains(s.statusbar.Text, "1:2") {
-		t.Errorf("Ctrl+Y status = %q, want to contain 1:2", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "1:2") {
+		t.Errorf("Ctrl+Y status = %q, want to contain 1:2", s.statusbar.Text().Get())
 	}
 }
 
@@ -780,8 +780,8 @@ func TestNewBufferClearsAll(t *testing.T) {
 	if s.dirty {
 		t.Error("newBuffer: dirty flag still set")
 	}
-	if !strings.Contains(s.statusbar.Text, "*scratch*") {
-		t.Errorf("newBuffer: status = %q, want to contain *scratch*", s.statusbar.Text)
+	if !strings.Contains(s.statusbar.Text().Get(), "*scratch*") {
+		t.Errorf("newBuffer: status = %q, want to contain *scratch*", s.statusbar.Text().Get())
 	}
 }
 

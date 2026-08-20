@@ -36,7 +36,7 @@ func widgetFactories() []factory {
 			return w
 		}},
 		{"label", func() toolkit.Widget {
-			w := &toolkit.Label{Text: "hello"}
+			w := toolkit.NewLabel("hello")
 			w.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 1})
 			return w
 		}},
@@ -250,7 +250,7 @@ func TestRenderToolkitEveryWidgetSurvivesCellBackend(t *testing.T) {
 // `tui.RenderToolkit(os.Stdout, widgets, nil)` works.
 func TestRenderToolkitNilThemeUsesDefault(t *testing.T) {
 	var buf bytes.Buffer
-	widgets := []toolkit.Widget{&toolkit.Label{Text: "x"}}
+	widgets := []toolkit.Widget{toolkit.NewLabel("x")}
 	widgets[0].SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 1})
 	if err := RenderToolkitSized(&buf, 20, 5, widgets, nil); err != nil {
 		t.Fatalf("RenderToolkitSized nil theme: %v", err)
@@ -265,7 +265,7 @@ func TestRenderToolkitNilThemeUsesDefault(t *testing.T) {
 // rather than producing an empty grid.
 func TestRenderToolkitNonPositiveDimsFallBackToDefaults(t *testing.T) {
 	var buf bytes.Buffer
-	widgets := []toolkit.Widget{&toolkit.Label{Text: "x"}}
+	widgets := []toolkit.Widget{toolkit.NewLabel("x")}
 	widgets[0].SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 1})
 	// cols = 0, rows = -1 should both fall through to defaults.
 	if err := RenderToolkitSized(&buf, 0, -1, widgets, nil); err != nil {
@@ -284,7 +284,7 @@ func TestRenderToolkitEnvSize(t *testing.T) {
 	t.Setenv("COLUMNS", "40")
 	t.Setenv("LINES", "12")
 	var buf bytes.Buffer
-	widgets := []toolkit.Widget{&toolkit.Label{Text: "x"}}
+	widgets := []toolkit.Widget{toolkit.NewLabel("x")}
 	widgets[0].SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 1})
 	if err := RenderToolkit(&buf, widgets, nil); err != nil {
 		t.Fatalf("RenderToolkit: %v", err)
@@ -306,7 +306,7 @@ var errToolkitBoom = errors.New("boom")
 // TestRenderToolkitSizedWriteError verifies the io.Writer error path
 // is wrapped and returned rather than dropped.
 func TestRenderToolkitSizedWriteError(t *testing.T) {
-	widgets := []toolkit.Widget{&toolkit.Label{Text: "x"}}
+	widgets := []toolkit.Widget{toolkit.NewLabel("x")}
 	widgets[0].SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 1})
 	err := RenderToolkitSized(toolkitErrWriter{}, 20, 5, widgets, toolkit.DefaultLight())
 	if err == nil {
