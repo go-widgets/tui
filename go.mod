@@ -6,7 +6,7 @@ require github.com/go-widgets/painter v0.11.0
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/go-widgets/toolkit v0.223.0
+	github.com/go-widgets/toolkit v0.224.0
 	golang.org/x/term v0.44.0
 )
 
@@ -14,7 +14,7 @@ require (
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/go-crdt/collab v0.18.0 // indirect
-	github.com/go-crdt/crdt v0.22.0 // indirect
+	github.com/go-crdt/crdt v0.25.0 // indirect
 	github.com/go-gfx/gfx v0.6.0 // indirect
 	github.com/go-iconoir/iconoir v0.2.0 // indirect
 	github.com/go-images/images v0.0.0-20260811115337-bc5d586f8e38 // indirect
