@@ -203,7 +203,7 @@ func (s *state) Draw(p painter.Painter, theme *toolkit.Theme) {
 	row(s.lastLbl, "LAST="+last, 8)
 	row(s.msgLbl, "MSG="+s.msg, 10)
 	pal := ""
-	if s.palette.Visible {
+	if s.palette.Visible().Get() {
 		pal = "PALETTE n=" + strconv.Itoa(len(s.palette.Commands))
 	}
 	row(s.paletteLbl, pal, 12)

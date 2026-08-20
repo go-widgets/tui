@@ -135,7 +135,7 @@ func TestOnEventHotRebind(t *testing.T) {
 func TestOnEventPaletteFedFromRegistry(t *testing.T) {
 	s := newState()
 	s.OnEvent(char("p"))
-	if !s.palette.Visible {
+	if !s.palette.Visible().Get() {
 		t.Fatal("p did not open the palette")
 	}
 	if len(s.palette.Commands) != 8 {
