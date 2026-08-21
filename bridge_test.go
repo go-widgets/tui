@@ -42,7 +42,7 @@ func widgetFactories() []factory {
 		}},
 		{"progressbar", func() toolkit.Widget {
 			w := toolkit.NewProgressBar()
-			w.Fraction = 0.5
+			w.Fraction().Set(0.5)
 			w.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 30, H: 3})
 			return w
 		}},
@@ -129,7 +129,7 @@ func widgetFactories() []factory {
 			child.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 20, H: 3})
 			w := toolkit.NewPopover(child)
 			w.Title = "Menu"
-			w.Visible = true
+			w.Visible().Set(true)
 			w.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 30, H: 8})
 			return w
 		}},
