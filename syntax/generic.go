@@ -47,7 +47,7 @@ var (
 			"switch", "this", "throw", "try", "typeof", "var", "void", "while", "with",
 			"yield", "let", "static", "async", "await", "of", "true", "false", "null",
 			"undefined"),
-		types:       set("string", "number", "boolean", "object", "symbol", "bigint", "any", "unknown", "never", "void"),
+		types:        set("string", "number", "boolean", "object", "symbol", "bigint", "any", "unknown", "never", "void"),
 		lineComments: []string{"//"}, blockOpen: "/*", blockClose: "*/", backtick: true,
 	}
 	pySpec = &langSpec{
@@ -56,7 +56,7 @@ var (
 			"finally", "for", "from", "global", "if", "import", "in", "is", "lambda",
 			"nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with",
 			"yield", "match", "case"),
-		types:       set("int", "float", "str", "bool", "bytes", "list", "dict", "set", "tuple", "complex"),
+		types:        set("int", "float", "str", "bool", "bytes", "list", "dict", "set", "tuple", "complex"),
 		lineComments: []string{"#"},
 	}
 	rubySpec = &langSpec{

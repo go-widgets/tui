@@ -12,8 +12,8 @@ import (
 	"github.com/go-widgets/toolkit"
 )
 
-func lbKey(code string) toolkit.Event  { return toolkit.Event{Kind: toolkit.EventKeyDown, Code: code} }
-func lbClick(y int) toolkit.Event       { return toolkit.Event{Kind: toolkit.EventClick, Y: y} }
+func lbKey(code string) toolkit.Event { return toolkit.Event{Kind: toolkit.EventKeyDown, Code: code} }
+func lbClick(y int) toolkit.Event     { return toolkit.Event{Kind: toolkit.EventClick, Y: y} }
 func lbPainter(w, h int) *painter.PixelPainter {
 	return painter.NewPixelPainter(make([]byte, w*h*4), w, h)
 }

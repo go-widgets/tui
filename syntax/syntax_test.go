@@ -54,7 +54,7 @@ func TestHighlightGo(t *testing.T) {
 		{"+", Punct},
 		{"// line comment", Comment},
 		{"// c", Comment},
-		{"/* block", Comment},  // block comment, first line
+		{"/* block", Comment},   // block comment, first line
 		{"comment */", Comment}, // block comment, second line
 		{"n", Plain},            // a plain identifier
 	}
@@ -84,7 +84,7 @@ func TestHighlightGoEdgeCases(t *testing.T) {
 	}
 	// Malformed source drives go/scanner's error handler (a no-op) without the
 	// highlighter failing.
-	Highlight("y := '", "a.go")    // unterminated rune literal
+	Highlight("y := '", "a.go")     // unterminated rune literal
 	Highlight("\x00 var z", "a.go") // illegal NUL byte
 }
 

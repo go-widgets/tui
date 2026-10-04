@@ -1,11 +1,10 @@
 module github.com/go-widgets/tui
 
-go 1.26.4
-
-require github.com/go-widgets/painter v0.13.0
+go 1.27.1
 
 require (
 	github.com/creack/pty v1.1.24
+	github.com/go-widgets/painter v0.13.0
 	github.com/go-widgets/toolkit v0.321.2
 	golang.org/x/term v0.46.0
 )

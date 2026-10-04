@@ -149,8 +149,8 @@ func TestFeedCSINamedSequences(t *testing.T) {
 // advance past the sequence so subsequent input parses cleanly.
 func TestFeedCSIUnknownConsumed(t *testing.T) {
 	cases := [][]byte{
-		{0x1B, '[', 'J'},           // no-params + unmapped final
-		{0x1B, '[', '9', '~'},      // ~-final + unmapped param
+		{0x1B, '[', 'J'},                // no-params + unmapped final
+		{0x1B, '[', '9', '~'},           // ~-final + unmapped param
 		{0x1B, '[', '1', ';', '2', 'A'}, // params + non-~ final
 	}
 	for i, seq := range cases {

@@ -9,7 +9,7 @@ import "testing"
 func TestLangConfigLangs(t *testing.T) {
 	cases := map[string]string{
 		"c.yaml": "yaml", "c.yml": "yaml",
-		"c.toml": "toml",
+		"c.toml":   "toml",
 		"main.hcl": "hcl", "x.tf": "hcl", "v.tfvars": "hcl",
 		"doc.tex": "latex", "d.latex": "latex", "s.sty": "latex", "c.cls": "latex",
 	}

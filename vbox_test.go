@@ -135,8 +135,8 @@ func TestVBoxOverlayPriorityAndNilChildren(t *testing.T) {
 	empty := &VBox{HeaderH: 1, FooterH: 1}
 	empty.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 10, H: 10})
 	empty.Draw(painter.NewPixelPainter(make([]byte, 10*10*4), 10, 10), toolkit.DefaultLight())
-	empty.OnEvent(vclick(0, 0))  // header band, nil header
-	empty.OnEvent(vclick(0, 9))  // footer band, nil footer
-	empty.OnEvent(vclick(0, 5))  // body band, nil body
+	empty.OnEvent(vclick(0, 0))                                         // header band, nil header
+	empty.OnEvent(vclick(0, 9))                                         // footer band, nil footer
+	empty.OnEvent(vclick(0, 5))                                         // body band, nil body
 	empty.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "X"}) // non-click, nil body
 }

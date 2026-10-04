@@ -120,7 +120,7 @@ func TestHSplitClickRouting(t *testing.T) {
 	// Nil-pane guards: clicks and keys on both sides are silent no-ops.
 	empty := &HSplit{LeftFrac: 30}
 	empty.SetBounds(toolkit.Rect{X: 0, Y: 0, W: 100, H: 20})
-	empty.OnEvent(vclick(10, 4)) // nil left
-	empty.OnEvent(vclick(50, 4)) // nil right
+	empty.OnEvent(vclick(10, 4))                                        // nil left
+	empty.OnEvent(vclick(50, 4))                                        // nil right
 	empty.OnEvent(toolkit.Event{Kind: toolkit.EventKeyDown, Code: "X"}) // nil left
 }
