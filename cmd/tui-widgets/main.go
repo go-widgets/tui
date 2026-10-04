@@ -239,9 +239,9 @@ func entries() []entry {
 		}},
 		{"vbox", 30, 6, func() toolkit.Widget {
 			return &tui.VBox{
-				Header: toolkit.NewLabel("header"),
-				Body:   toolkit.NewLabel("body"),
-				Footer: toolkit.NewLabel("footer"),
+				Header:  toolkit.NewLabel("header"),
+				Body:    toolkit.NewLabel("body"),
+				Footer:  toolkit.NewLabel("footer"),
 				HeaderH: 1, FooterH: 1,
 			}
 		}},

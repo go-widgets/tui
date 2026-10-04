@@ -17,9 +17,9 @@ func mkPainter(w, h int) *painter.PixelPainter {
 	return painter.NewPixelPainter(make([]byte, w*h*4), w, h)
 }
 
-func key(code string) toolkit.Event  { return toolkit.Event{Kind: toolkit.EventKeyDown, Code: code} }
-func char(s string) toolkit.Event    { return toolkit.Event{Kind: toolkit.EventChar, Code: s} }
-func click(x, y int) toolkit.Event   { return toolkit.Event{Kind: toolkit.EventClick, X: x, Y: y} }
+func key(code string) toolkit.Event { return toolkit.Event{Kind: toolkit.EventKeyDown, Code: code} }
+func char(s string) toolkit.Event   { return toolkit.Event{Kind: toolkit.EventChar, Code: s} }
+func click(x, y int) toolkit.Event  { return toolkit.Event{Kind: toolkit.EventClick, X: x, Y: y} }
 
 func TestNewTextEditor(t *testing.T) {
 	e := NewTextEditor()
@@ -782,7 +782,7 @@ func TestTextEditorIndent(t *testing.T) {
 	// columns to 0.
 	e.SetText("    a\n    b")
 	e.anchorLine, e.anchorCol, e.selActive = 0, 2, true // anchor within line 0's spaces
-	e.CursorLine, e.CursorCol = 1, 1                     // caret within line 1's spaces
+	e.CursorLine, e.CursorCol = 1, 1                    // caret within line 1's spaces
 	e.OnEvent(key("Shift+Tab"))
 	if e.Text() != "a\nb" || e.CursorCol != 0 || e.anchorCol != 0 {
 		t.Fatalf("dedent col-clamp = %q caret=%d anchor=%d", e.Text(), e.CursorCol, e.anchorCol)

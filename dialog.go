@@ -28,7 +28,7 @@ type Dialog struct {
 	Title    string
 	Message  []string
 	Buttons  []string
-	Active   int  // focused button index
+	Active   int // focused button index
 	Visible  bool
 	OnAction func(idx int, label string)
 }

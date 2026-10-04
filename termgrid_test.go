@@ -255,6 +255,7 @@ func TestParseNumsEmpty(t *testing.T) {
 		t.Errorf("parseNums(\"\") = %v, want nil", got)
 	}
 }
+
 // TestRowTextZeroRuneWritesSpace exercises the "r == 0" branch that
 // initialisation-to-space normally hides.
 func TestRowTextZeroRuneWritesSpace(t *testing.T) {

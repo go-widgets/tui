@@ -387,9 +387,9 @@ func TestExplorerClickOnGripStartsDragAndResizes(t *testing.T) {
 	// hSplit), leftFrac = 40*100/80 = 50. Grip lands at local X=40,
 	// wire X=41.
 	keys := [][]byte{
-		sgrMousePress(25, 5),                 // press on grip
-		sgrMouseDrag(41, 5),                  // drag to new X
-		[]byte("\x1b[<0;41;5m"),              // release at same spot
+		sgrMousePress(25, 5),    // press on grip
+		sgrMouseDrag(41, 5),     // drag to new X
+		[]byte("\x1b[<0;41;5m"), // release at same spot
 		[]byte("q"),
 	}
 	g := captureFrameWithBytes(t, 80, 30, keys, 5*time.Second)
@@ -763,7 +763,7 @@ func spawnExplorer(t *testing.T, cols, rows int) *explorerSession {
 	return s
 }
 
-func (s *explorerSession) close()          { _ = s.ptmx.Close() }
+func (s *explorerSession) close()           { _ = s.ptmx.Close() }
 func (s *explorerSession) send(keys string) { _, _ = s.ptmx.Write([]byte(keys)) }
 func (s *explorerSession) grid() *tui.TermGrid {
 	return tui.DecodeANSI(s.buf.Bytes(), s.cols, s.rows)

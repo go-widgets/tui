@@ -131,6 +131,7 @@ func TestHelpToggleFlipsVisible(t *testing.T) {
 		t.Fatal("second ? did not hide help")
 	}
 }
+
 // TestSearchOpenFilterAccept covers the finder happy path: "/" opens it, typing
 // through the capture filters the list, and Enter accepts + keeps the matches.
 func TestSearchOpenFilterAccept(t *testing.T) {

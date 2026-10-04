@@ -111,8 +111,8 @@ func TestFocusRingDrawsFocusCue(t *testing.T) {
 
 	en := NewEntry("hi")
 	bt := NewButton("Go", nil)
-	cb := NewCheckButton("On", false)  // unchecked → focus cue is the accent box
-	rb := NewRadioButton("Pick")       // unchecked → accent mark on focus
+	cb := NewCheckButton("On", false) // unchecked → focus cue is the accent box
+	rb := NewRadioButton("Pick")      // unchecked → accent mark on focus
 	for i, w := range []Focusable{en, bt, cb, rb} {
 		w.SetBounds(toolkit.Rect{X: 0, Y: i, W: 10, H: 1})
 	}

@@ -37,13 +37,13 @@ import (
 // Cells is row-major: one entry per (y*Cols+x). Storing (R,G,B,Set)
 // tuples keeps the JSON diff readable when a color changes.
 type goldenFrame struct {
-	Cols int          `json:"cols"`
-	Rows int          `json:"rows"`
+	Cols  int          `json:"cols"`
+	Rows  int          `json:"rows"`
 	Cells []goldenCell `json:"cells"`
 }
 
 type goldenCell struct {
-	Rune int32 `json:"r"`
+	Rune int32  `json:"r"`
 	Fg   [4]int `json:"fg"` // R, G, B, Set (0/1)
 	Bg   [4]int `json:"bg"`
 }

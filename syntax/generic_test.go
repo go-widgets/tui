@@ -40,7 +40,7 @@ func TestHighlightJavaScript(t *testing.T) {
 		{"'c'", String},
 		{"42", Number},
 		{"// hi", Comment},
-		{"/* b", Comment},   // block comment line 1
+		{"/* b", Comment},    // block comment line 1
 		{"lock */", Comment}, // block comment line 2
 		{"{", Punct},
 	}
